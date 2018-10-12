@@ -14,15 +14,15 @@ class Sequence(nn.Module):
         self.prelstm = nn.Linear(numsegments, hiddensize)
         self.linear = nn.Linear(hiddensize, 1)
 
-    def init_lstms(self):
+    def init_lstms(self, device=None):
         # h_0 of shape (num_layers * num_directions, batch, hidden_size):
         #   tensor containing the initial hidden state for each element in the batch.
         # c_0 of shape (num_layers * num_directions, batch, hidden_size):
         #   tensor containing the initial cell state for each element in the batch.
 
         # FIXME: batchsize == numsegments for now...
-        h_t = torch.zeros(2, self.batchsize, self.hiddensize)
-        c_t = torch.zeros(2, self.batchsize, self.hiddensize)
+        h_t = torch.zeros(2, self.batchsize, self.hiddensize).to(device)
+        c_t = torch.zeros(2, self.batchsize, self.hiddensize).to(device)
         # h_t2 = torch.zeros(1, self.batchsize, self.hiddensize)
         # c_t2 = torch.zeros(1, self.batchsize, self.hiddensize)
 
@@ -34,6 +34,7 @@ class Sequence(nn.Module):
     def forward(self, input, lstm_states, future=0):
         (h_t, c_t) = lstm_states
 
+        # print(input.size())
         x = self.prelstm(input)
 
         # Expected input: (histlen x batchsize x dense_t)

@@ -31,7 +31,7 @@ def find_by_id(idname):
 def date_in_seconds(dobj):
 	return time.mktime(dobj.timetuple())
 
-def generate(segdef, sensor_id, histlen=3, neighborlist=None):
+def create_dataset(segdef):
 	'''
 	TODO: Specify neighbors in neighborlist
 		otherwise all are used
@@ -88,34 +88,45 @@ def generate(segdef, sensor_id, histlen=3, neighborlist=None):
 	print('Total missing: %.1f%%' % (
 		nmissing / ((tsteps + 1) * len(raw_segments)) * 100.0))
 
+
+	for sii, segment in enumerate(datamat):
+		lastvalid = -1
+		for ind, val in enumerate(segment):
+			if lastvalid < ind - 1:
+				# if there is a gap
+				#   fill with current value
+				datamat[sii, lastvalid:ind] = val
+			if val != -1: lastvalid = ind
+
+	datamat /= 100.0 # normalize under 100
+
 	return datamat, raw_segments
 
-def get_batch(datamat, inds, histlen=5):
+def target_batch(datamat, target, inds, history=5):
 	'''
-	inds - array of ints len(# sequences)... starting index to get data from in each seq
+	inds - array of starting indicies to get sequences from
 	'''
-	# TODO: return batch instead of sample per sequence?
-
 	series = []
 	labels = []
-	for sii, ind in enumerate(inds):
+	for bii, ind in enumerate(inds):
 		# all observable data up to time-ind
-		data = datamat[:, ind:ind+histlen]
-		# target is sinlge datapoint at location sii
-		lbl = datamat[sii, ind+histlen]
+		data = datamat[:, ind:ind+history]
+		# target is sinlge datapoint for segment target
+		lbl = datamat[target, ind+history]
 
 		series.append(data)
 		labels.append(lbl)
 	# labels =
-	data = np.array(data)
+	series = np.array(series)
 	labels = np.array(labels)
-	return data, labels
+	return series, labels
 
 
 if __name__ == '__main__':
-	dataset, metadata = generate(SEGMENTS[0], 0, histlen=3)
+	BATCHSIZE = 32
+	dataset, metadata = create_dataset(SEGMENTS[0])
 
-	inds = [0] * len(SEGMENTS[0]['locations'])
-	segments, labels = get_batch(dataset, inds, histlen=3)
+	inds = [0] * BATCHSIZE
+	segments, labels = target_batch(dataset, 0, inds, history=3)
 	print('X - segments:', segments.shape)
 	print('Y - labels  :', labels.shape)
