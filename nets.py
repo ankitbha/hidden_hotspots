@@ -21,15 +21,15 @@ class Sequence(nn.Module):
             nn.Linear(hiddensize, 1),
         ])
 
-    def init_lstms(self, device=None, grad=True):
+    def init_lstms(self, device=None, grad=True, batch=None):
         # h_0 of shape (num_layers * num_directions, batch, hidden_size):
         #   tensor containing the initial hidden state for each element in the batch.
         # c_0 of shape (num_layers * num_directions, batch, hidden_size):
         #   tensor containing the initial cell state for each element in the batch.
-
+        bsize = self.batchsize if batch is None else batch
         # FIXME: batchsize == numsegments for now...
-        h_t = torch.zeros(2, self.batchsize, self.hiddensize, requires_grad=grad, dtype=torch.double).to(device)
-        c_t = torch.zeros(2, self.batchsize, self.hiddensize, requires_grad=grad, dtype=torch.double).to(device)
+        h_t = torch.zeros(2, bsize, self.hiddensize, requires_grad=grad, dtype=torch.double).to(device)
+        c_t = torch.zeros(2, bsize, self.hiddensize, requires_grad=grad, dtype=torch.double).to(device)
         # h_t2 = torch.zeros(1, self.batchsize, self.hiddensize)
         # c_t2 = torch.zeros(1, self.batchsize, self.hiddensize)
 

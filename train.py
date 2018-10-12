@@ -31,6 +31,21 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
+def plot_next(imgname, target, segments, predictions):
+    plt.figure(figsize=(14, 7))
+    for sii, seg in enumerate(segments):
+        if sii != target:
+            plt.plot(seg*100, color='gray')
+    for sii, seg in enumerate(segments):
+        if sii == target:
+            plt.plot(seg*100, color='C0')
+    pxs = [ii for ii in range(seqlen-1, segments.shape[1])]
+    assert len(pxs) == len(predictions)
+    plt.plot(pxs, predictions, color='C1')
+    plt.gca().set_title('Avg Loss: %.2f' % lossavg)
+    plt.savefig(imgname)
+    plt.close()
+
 if __name__ == '__main__':
     # set random seed to 0
     np.random.seed(0)
@@ -128,31 +143,32 @@ if __name__ == '__main__':
             sys.stdout.flush()
 
         seq.eval()
-        numseqs = test_data.shape[1] // seqlen
-        seqinds = [int(ii * seqlen) for ii in range(numseqs)]
-        numbatches = numseqs // args.batch
-        lossavg = 0.0
-        for bii in range(numbatches):
-            bii *= args.batch
-            batch_inds = seqinds[bii:bii+args.batch]
+        lossavg = 0
+
+        predictions = []
+        for ind in range(test_data.shape[1]-seqlen+1):
             batch_seq, batch_lbls = target_batch(
                 test_data,
                 args.target,
-                batch_inds,
+                [ind],
                 history=args.history)
-
             batch_seq = np.transpose(batch_seq, [2, 0, 1])
             batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=False).to(device)
             batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(1).to(device)
 
-            lstm_state = seq.init_lstms(device=device)
+            lstm_state = seq.init_lstms(device=device, batch=1)
             preds, _ = seq(batch_seq, lstm_state)
+
+            predval = preds.detach().squeeze().cpu().numpy()
+            predictions.append(predval*100)
 
             loss = criterion(preds, batch_lbls)
             lossavg += loss.detach().cpu().numpy()
-        lossavg /= numbatches
+        lossavg /= (test_data.shape[1] - seqlen)
         log.add_scalar('test/loss', lossavg, n_iter)
         print('\n   Testing Loss:  %.3f' % lossavg)
+
+        plot_next('preview/pred_next_%d.png' % n_iter, args.target, test_data, predictions)
     print()
 
     log.close()
