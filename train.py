@@ -29,11 +29,13 @@ from nets import *
 from configs import *
 from random import shuffle
 from torch.autograd import Variable
+from tensorboardX import SummaryWriter
 
 if __name__ == '__main__':
     # set random seed to 0
     np.random.seed(0)
     torch.manual_seed(0)
+
 
     parser = argparse.ArgumentParser(description='LSTM for traffic congestion prediction')
     # parser.add_argument('segment', help='Name of segment')
@@ -51,6 +53,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    log = SummaryWriter()
 
     # printing arguments
     print(os.linesep + 'Program arguments: ')
@@ -86,6 +89,7 @@ if __name__ == '__main__':
         seqinds = [int(ii * seqlen) for ii in range(numseqs)]
         shuffle(seqinds)
 
+        losses = []
         for bii in range(0, len(seqinds)-args.batch, args.batch):
             batch_inds = seqinds[bii:bii+args.batch]
             batch_seq, batch_lbls = target_batch(
@@ -94,18 +98,15 @@ if __name__ == '__main__':
                 batch_inds,
                 history=args.history)
 
-            plt.figure(figsize=(14, 14))
-            for jj in range(4):
-                plt.subplot(4, 1, jj+1)
-                plt.gca().set_title(batch_lbls[jj]*100)
-                for ii in range(len(use_segment['locations'])):
-                    plt.plot(batch_seq[jj, ii, :]*100)
-            plt.savefig('dump.png')
-            plt.close()
-            assert False
-
-            # print(batch_seq.shape)
-            # print(batch_lbls.shape)
+            # plt.figure(figsize=(14, 14))
+            # for jj in range(4):
+            #     plt.subplot(4, 1, jj+1)
+            #     plt.gca().set_title(batch_lbls[jj]*100)
+            #     for ii in range(len(use_segment['locations'])):
+            #         plt.plot(batch_seq[jj, ii, :]*100)
+            # plt.savefig('dump.png')
+            # plt.close()
+            # assert False
 
             # torch rnn format:
             #   numpy (batch x datapoints x sequence)
@@ -119,20 +120,24 @@ if __name__ == '__main__':
             preds, _ = seq(batch_seq, lstm_state)
 
             loss = criterion(preds, batch_lbls)
+            losses.append(loss.item())
+            log.add_scalar('train/loss', loss, eii*numseqs+bii)
+            # log.add_scalar('test/loss', loss, eii*numseqs+bii)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
 
-            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f  \n' % (
+            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f  \r' % (
                 eii+1, args.epochs,
                 (bii+1)//args.batch, len(seqinds)//args.batch,
                 loss.item(),
             ))
             sys.stdout.flush()
-            # print()
-            # assert False
     print()
+
+    # writer.export_scalars_to_json("./all_scalars.json")
+    log.close()
 
 
         # optimizer.step(closure)

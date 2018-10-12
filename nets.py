@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import torch.nn.functional as F
 
 class Sequence(nn.Module):
     def __init__(self, batchsize, historylen, numsegments, hiddensize):
@@ -10,9 +11,15 @@ class Sequence(nn.Module):
         self.historylen = historylen
         self.numsegments = numsegments
         self.hiddensize = hiddensize
-        self.lstm1 = nn.LSTM(hiddensize, hiddensize, num_layers=2)
-        self.prelstm = nn.Linear(numsegments, hiddensize)
-        self.linear = nn.Linear(hiddensize, 1)
+        self.lstm = nn.LSTM(hiddensize, hiddensize, num_layers=2)
+        self.prelstm = nn.Sequential(*[
+            nn.Linear(numsegments, hiddensize),
+            # nn.ReLU(),
+        ])
+        self.postlstm = nn.Sequential(*[
+            nn.ReLU(),
+            nn.Linear(hiddensize, 1),
+        ])
 
     def init_lstms(self, device=None):
         # h_0 of shape (num_layers * num_directions, batch, hidden_size):
@@ -37,11 +44,13 @@ class Sequence(nn.Module):
         # print(input.size())
         x = self.prelstm(input)
 
+        # print(x.device, h_t.device, c_t.device)
         # Expected input: (histlen x batchsize x dense_t)
-        x, (h_t, c_t) = self.lstm1(x, (h_t, c_t))
+        x, (h_t, c_t) = self.lstm(x, (h_t, c_t))
+        # x = F.relu(x)
 
         last_x = x[-1, :, :]
-        x = self.linear(last_x)
+        x = self.postlstm(last_x)
 
         return x, (h_t, c_t)
 
