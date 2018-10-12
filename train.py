@@ -46,6 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=4)
     parser.add_argument('--segment', type=int, required=True, help='Segment to train on; check configs...')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
+    parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     # FIXME: batchsize = # segments right now...
     # parser.add_argument('--hops', type=int, choices=(0,1,2), default=0, help='Number of hops for neighborhood')
     # parser.add_argument('--ahead', type=int, default=0, help='Number of timestamps to predict in the future')
@@ -81,8 +82,14 @@ if __name__ == '__main__':
         seq.train()
         # TODO: strided indices for more batches
         seqlen = args.history + 1
-        numseqs = train_data.shape[1] // seqlen
-        seqinds = [int(ii * seqlen) for ii in range(numseqs)]
+        stride = args.history // args.stride
+        assert stride > 2
+        numseqs = 0
+        seqinds = []
+        for ind in range(0, train_data.shape[1] - seqlen, stride):
+            seqinds.append(ind)
+            assert ind < train_data.shape[1]
+            numseqs += 1
         shuffle(seqinds)
         numbatches = numseqs // args.batch
 
@@ -148,37 +155,4 @@ if __name__ == '__main__':
         print('\n   Testing Loss:  %.3f' % lossavg)
     print()
 
-    # writer.export_scalars_to_json("./all_scalars.json")
     log.close()
-
-
-        # optimizer.step(closure)
-        # train_loss = min(losslist)
-        # loss_mat[i,0] = train_loss
-
-        # # begin to predict, no need to track gradient here
-        # with torch.no_grad():
-        #     pred = seq(test_input, future=args.ahead)
-        #     loss = criterion(pred, test_target)
-        #     test_loss = loss.item()
-        #     print('test loss:', test_loss)
-        #     loss_mat[i,1] = test_loss
-        #     y = pred.detach().numpy()
-        #     ys_iter.append(y)
-
-    # min_train_loss, min_test_loss = loss_mat.min(axis=0)
-    # min_train_loss_iter, min_test_loss_iter = loss_mat.argmin(axis=0)
-    # stat1 = 'min_train_loss = {}, min_train_loss_iter = {}'.format(min_train_loss, min_train_loss_iter + 1)
-    # stat2 = 'min_test_loss = {}, min_test_loss_iter = {}'.format(min_test_loss, min_test_loss_iter + 1)
-    # print(stat1)
-    # print(stat2)
-
-    # # save the predictions with min test loss
-    # np.savetxt(os.path.join(saverootdir, '{}-predict-alldays-{}-{}hop-h{}-a{}-stopiter{:02d}.csv'.format(segname, nnname, args.hops, args.history, args.ahead, min_test_loss_iter)), ys_iter[min_test_loss_iter][:,1:], fmt='%f', delimiter=',')
-    # np.savetxt(os.path.join(saverootdir, '{}-actual-alldays-h{}.csv'.format(segname, args.history)), test_target.numpy()[:,:-1], fmt='%f', delimiter=',')
-
-    # with open(os.path.join(saverootdir, '{}-losses-{}-{}hop-h{}-a{}.txt'.format(segname, nnname, args.hops, args.history, args.ahead)), 'w') as fout:
-    #     fout.write(stat1 + '\n')
-    #     fout.write(stat2 + '\n')
-    #     fout.write('Min train loss,test loss\n')
-    #     np.savetxt(fout, loss_mat, delimiter=',', fmt='%f')
