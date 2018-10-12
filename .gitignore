@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.png
 runs
+*.DS_Store
 
 # C extensions
 *.so

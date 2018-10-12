@@ -169,6 +169,9 @@ if __name__ == '__main__':
         print('\n   Testing Loss:  %.3f' % lossavg)
 
         plot_next('preview/pred_next_%d.png' % n_iter, args.target, test_data, predictions)
+
+        if eii % 10 == 0:
+            torch.save(seq, 'checkpoints/%s.pth' % seq.name)
     print()
 
     log.close()

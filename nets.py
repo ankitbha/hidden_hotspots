@@ -5,6 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 
 class Sequence(nn.Module):
+    name = 'v1'
     def __init__(self, batchsize, historylen, numsegments, hiddensize):
         super(Sequence, self).__init__()
         self.batchsize = batchsize

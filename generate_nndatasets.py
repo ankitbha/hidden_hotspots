@@ -106,7 +106,13 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
 	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
 
-	return (train_data, test_data), raw_segments
+	train_meta = []
+	test_meta = []
+	for seg_metadata in raw_segments:
+		train_meta.append(seg_metadata[:splitind])
+		test_meta.append(seg_metadata[splitind:])
+
+	return (train_data, test_data), (train_meta, test_meta)
 
 def target_batch(datamat, target, inds, history=5):
 	'''
