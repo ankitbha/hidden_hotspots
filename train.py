@@ -63,13 +63,7 @@ if __name__ == '__main__':
 
     use_segment = SEGMENTS[args.segment]
     numsegments = len(use_segment['locations'])
-    dataset, metadata = create_dataset(use_segment)
-	# segments, labels = get_batch(dataset, inds, histlen=3)
-
-    # plt.figure(figsize=(14, 7))
-    # plt.plot(dataset[0, :])
-    # plt.savefig('dump.png')
-    # plt.close()
+    (train_data, test_data), metadata = create_dataset(use_segment)
 
     seq = Sequence(
         batchsize=args.batch,
@@ -87,7 +81,7 @@ if __name__ == '__main__':
         seq.train()
         # TODO: strided indices for more batches
         seqlen = args.history + 1
-        numseqs = dataset.shape[1] // seqlen
+        numseqs = train_data.shape[1] // seqlen
         seqinds = [int(ii * seqlen) for ii in range(numseqs)]
         shuffle(seqinds)
         numbatches = numseqs // args.batch
@@ -97,7 +91,7 @@ if __name__ == '__main__':
             bii *= args.batch
             batch_inds = seqinds[bii:bii+args.batch]
             batch_seq, batch_lbls = target_batch(
-                dataset,
+                train_data,
                 args.target,
                 batch_inds,
                 history=args.history)
@@ -127,7 +121,7 @@ if __name__ == '__main__':
             sys.stdout.flush()
 
         seq.eval()
-        numseqs = dataset.shape[1] // seqlen
+        numseqs = test_data.shape[1] // seqlen
         seqinds = [int(ii * seqlen) for ii in range(numseqs)]
         numbatches = numseqs // args.batch
         lossavg = 0.0
@@ -135,7 +129,7 @@ if __name__ == '__main__':
             bii *= args.batch
             batch_inds = seqinds[bii:bii+args.batch]
             batch_seq, batch_lbls = target_batch(
-                dataset,
+                test_data,
                 args.target,
                 batch_inds,
                 history=args.history)
@@ -151,7 +145,7 @@ if __name__ == '__main__':
             lossavg += loss.detach().cpu().numpy()
         lossavg /= numbatches
         log.add_scalar('test/loss', lossavg, n_iter)
-        print('   Testing Loss:  %.3f' % lossavg)
+        print('\n   Testing Loss:  %.3f' % lossavg)
     print()
 
     # writer.export_scalars_to_json("./all_scalars.json")

@@ -31,7 +31,16 @@ def find_by_id(idname):
 def date_in_seconds(dobj):
 	return time.mktime(dobj.timetuple())
 
-def create_dataset(segdef):
+def pad_valid(series):
+	lastvalid = -1
+	for ind, val in enumerate(series):
+		if lastvalid < ind - 1:
+			# if there is a gap
+			#   fill with next valid value
+			series[lastvalid+1:ind] = val
+		if val != -1: lastvalid = ind
+
+def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 	'''
 	TODO: Specify neighbors in neighborlist
 		otherwise all are used
@@ -90,17 +99,14 @@ def create_dataset(segdef):
 
 
 	for sii, segment in enumerate(datamat):
-		lastvalid = -1
-		for ind, val in enumerate(segment):
-			if lastvalid < ind - 1:
-				# if there is a gap
-				#   fill with current value
-				datamat[sii, lastvalid:ind] = val
-			if val != -1: lastvalid = ind
-
+		fillmethod(segment)
 	datamat /= 100.0 # normalize under 100
 
-	return datamat, raw_segments
+	splitind = int(datamat.shape[1] * split)
+	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
+	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
+
+	return (train_data, test_data), raw_segments
 
 def target_batch(datamat, target, inds, history=5):
 	'''
@@ -124,9 +130,9 @@ def target_batch(datamat, target, inds, history=5):
 
 if __name__ == '__main__':
 	BATCHSIZE = 32
-	dataset, metadata = create_dataset(SEGMENTS[0])
+	(train, test), metadata = create_dataset(SEGMENTS[0])
 
 	inds = [0] * BATCHSIZE
-	segments, labels = target_batch(dataset, 0, inds, history=3)
+	segments, labels = target_batch(train, 0, inds, history=3)
 	print('X - segments:', segments.shape)
 	print('Y - labels  :', labels.shape)
