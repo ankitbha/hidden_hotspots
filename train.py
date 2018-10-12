@@ -52,7 +52,8 @@ if __name__ == '__main__':
     # parser.add_argument('--gc', action='store_true', help='Whether to perform graph convolution (valid only if hops > 0)')
     args = parser.parse_args()
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     log = SummaryWriter()
 
     # printing arguments
@@ -83,14 +84,17 @@ if __name__ == '__main__':
 
     for eii in range(args.epochs):
 
+        seq.train()
         # TODO: strided indices for more batches
         seqlen = args.history + 1
         numseqs = dataset.shape[1] // seqlen
         seqinds = [int(ii * seqlen) for ii in range(numseqs)]
         shuffle(seqinds)
+        numbatches = numseqs // args.batch
 
         losses = []
-        for bii in range(0, len(seqinds)-args.batch, args.batch):
+        for bii in range(numbatches):
+            bii *= args.batch
             batch_inds = seqinds[bii:bii+args.batch]
             batch_seq, batch_lbls = target_batch(
                 dataset,
@@ -98,19 +102,6 @@ if __name__ == '__main__':
                 batch_inds,
                 history=args.history)
 
-            # plt.figure(figsize=(14, 14))
-            # for jj in range(4):
-            #     plt.subplot(4, 1, jj+1)
-            #     plt.gca().set_title(batch_lbls[jj]*100)
-            #     for ii in range(len(use_segment['locations'])):
-            #         plt.plot(batch_seq[jj, ii, :]*100)
-            # plt.savefig('dump.png')
-            # plt.close()
-            # assert False
-
-            # torch rnn format:
-            #   numpy (batch x datapoints x sequence)
-            #   torch (sequnce x batch x datapoints)
             batch_seq = np.transpose(batch_seq, [2, 0, 1])
             batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=True).to(device)
             batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(1).to(device)
@@ -121,19 +112,46 @@ if __name__ == '__main__':
 
             loss = criterion(preds, batch_lbls)
             losses.append(loss.item())
-            log.add_scalar('train/loss', loss, eii*numseqs+bii)
-            # log.add_scalar('test/loss', loss, eii*numseqs+bii)
+            n_iter = eii*numseqs+bii
+            log.add_scalar('train/loss', loss, n_iter)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
 
-            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f  \r' % (
+            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f          \r' % (
                 eii+1, args.epochs,
-                (bii+1)//args.batch, len(seqinds)//args.batch,
+                bii//args.batch+1, numbatches,
                 loss.item(),
             ))
             sys.stdout.flush()
+
+        seq.eval()
+        numseqs = dataset.shape[1] // seqlen
+        seqinds = [int(ii * seqlen) for ii in range(numseqs)]
+        numbatches = numseqs // args.batch
+        lossavg = 0.0
+        for bii in range(numbatches):
+            bii *= args.batch
+            batch_inds = seqinds[bii:bii+args.batch]
+            batch_seq, batch_lbls = target_batch(
+                dataset,
+                args.target,
+                batch_inds,
+                history=args.history)
+
+            batch_seq = np.transpose(batch_seq, [2, 0, 1])
+            batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=False).to(device)
+            batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(1).to(device)
+
+            lstm_state = seq.init_lstms(device=device)
+            preds, _ = seq(batch_seq, lstm_state)
+
+            loss = criterion(preds, batch_lbls)
+            lossavg += loss.detach().cpu().numpy()
+        lossavg /= numbatches
+        log.add_scalar('test/loss', lossavg, n_iter)
+        print('   Testing Loss:  %.3f' % lossavg)
     print()
 
     # writer.export_scalars_to_json("./all_scalars.json")
