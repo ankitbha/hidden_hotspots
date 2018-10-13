@@ -8,7 +8,7 @@
 #
 # Layers: 1-D Conv -> 1-D Pooling -> 1-D Conv -> 1-D Pooling -> LSTM
 #
-# Author: Shiva R. Iyer
+# Author: Shiva R. Iyer, Ulzee An
 #
 # Date: Aug 15, 2018
 #
@@ -24,7 +24,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
-from generate_nndatasets import *
+from datasets import *
 from nets import *
 from configs import *
 from random import shuffle
@@ -68,8 +68,8 @@ if __name__ == '__main__':
     # parser.add_argument('--gc', action='store_true', help='Whether to perform graph convolution (valid only if hops > 0)')
     args = parser.parse_args()
 
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
     log = SummaryWriter()
 
     # printing arguments
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     numsegments = len(use_segment['locations'])
     (train_data, test_data), metadata = create_dataset(use_segment)
 
-    seq = Sequence(
+    seq = NextVal(
         batchsize=args.batch,
         historylen=args.history,
         numsegments=numsegments,
@@ -112,7 +112,7 @@ if __name__ == '__main__':
         for bii in range(numbatches):
             bii *= args.batch
             batch_inds = seqinds[bii:bii+args.batch]
-            batch_seq, batch_lbls = target_batch(
+            batch_seq, batch_lbls = nextval_batch(
                 train_data,
                 args.target,
                 batch_inds,
@@ -147,7 +147,7 @@ if __name__ == '__main__':
 
         predictions = []
         for ind in range(test_data.shape[1]-seqlen+1):
-            batch_seq, batch_lbls = target_batch(
+            batch_seq, batch_lbls = nextval_batch(
                 test_data,
                 args.target,
                 [ind],

@@ -6,7 +6,7 @@
 # 2-D panel dataset, where first axis is spatial and second axis is
 # temporal.
 #
-# Author: Shiva R. Iyer
+# Author: Shiva R. Iyer, Ulzee An
 #
 # Date: Aug 15, 2018
 #
@@ -114,7 +114,7 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 
 	return (train_data, test_data), (train_meta, test_meta)
 
-def target_batch(datamat, target, inds, history=5):
+def nextval_batch(datamat, target, inds, history=5):
 	'''
 	inds - array of starting indicies to get sequences from
 	'''
@@ -133,12 +133,36 @@ def target_batch(datamat, target, inds, history=5):
 	labels = np.array(labels)
 	return series, labels
 
+def series_batch(datamat, target, inds, history=5):
+	'''
+	Returns data in batches where time segment of `target` is missing.
+
+	inds - array of starting indicies to get sequences from
+	'''
+	series = []
+	labels = []
+	for bii, ind in enumerate(inds):
+		# all segments != target and their observations between ind:history
+		data = []
+		for segii, segment in enumerate(datamat):
+			if segii == target: continue
+			data.append(datamat[segii, ind:ind+history])
+		data = np.array(data)
+		# predictions made for entire missing target segment
+		lbl = datamat[target, ind:ind+history]
+
+		series.append(data)
+		labels.append(lbl)
+	# labels =
+	series = np.array(series)
+	labels = np.array(labels)
+	return series, labels
 
 if __name__ == '__main__':
 	BATCHSIZE = 32
 	(train, test), metadata = create_dataset(SEGMENTS[0])
 
 	inds = [0] * BATCHSIZE
-	segments, labels = target_batch(train, 0, inds, history=3)
+	segments, labels = nextval_batch(train, 0, inds, history=3)
 	print('X - segments:', segments.shape)
 	print('Y - labels  :', labels.shape)
