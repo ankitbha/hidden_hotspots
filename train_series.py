@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
-from generate_nndatasets import *
+from datasets import *
 from nets import *
 from configs import *
 from random import shuffle
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--batch', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; check configs...')
+    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for all; check configs...')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     args = parser.parse_args()
@@ -43,16 +43,12 @@ if __name__ == '__main__':
     device = torch.device("cpu")
     log = SummaryWriter()
 
-    # printing arguments
-    print(os.linesep + 'Program arguments: ')
-    print('Segment: {}, history: {}, lr: {}, hidden: {}'.format(
-        args.segment, args.history, args.lr, args.hidden) + os.linesep)
-
+    # TODO: ability to train on all segments
     use_segment = SEGMENTS[args.segment]
     numsegments = len(use_segment['locations'])
     (train_data, test_data), metadata = create_dataset(use_segment)
 
-    seq = Sequence(
+    model = Series(
         batchsize=args.batch,
         historylen=args.history,
         numsegments=numsegments,
@@ -61,12 +57,11 @@ if __name__ == '__main__':
     # mean-squared loss criterion works reasonably for estimating real
     # values
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(seq.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     for eii in range(args.epochs):
 
-        seq.train()
-        # TODO: strided indices for more batches
+        model.train()
         seqlen = args.history + 1
         stride = args.history // args.stride
         assert stride > 2
@@ -83,19 +78,20 @@ if __name__ == '__main__':
         for bii in range(numbatches):
             bii *= args.batch
             batch_inds = seqinds[bii:bii+args.batch]
-            batch_seq, batch_lbls = nextval_batch(
+            batch_seq, batch_lbls = series_batch(
                 train_data,
                 args.target,
                 batch_inds,
                 history=args.history)
 
             batch_seq = np.transpose(batch_seq, [2, 0, 1])
-            batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=True).to(device)
-            batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(1).to(device)
+            batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=True) \
+                .to(device).double()
+            batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(2).to(device)
 
-            lstm_state = seq.init_lstms(device=device)
+            lstm_state = model.init_lstms(device=device)
 
-            preds, _ = seq(batch_seq, lstm_state)
+            preds, _ = model(batch_seq, lstm_state)
 
             loss = criterion(preds, batch_lbls)
             losses.append(loss.item())
@@ -113,22 +109,23 @@ if __name__ == '__main__':
             ))
             sys.stdout.flush()
 
-        seq.eval()
+        model.eval()
         lossavg = 0
 
         predictions = []
         for ind in range(test_data.shape[1]-seqlen+1):
-            batch_seq, batch_lbls = nextval_batch(
+            batch_seq, batch_lbls = series_batch(
                 test_data,
                 args.target,
                 [ind],
                 history=args.history)
             batch_seq = np.transpose(batch_seq, [2, 0, 1])
-            batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=False).to(device)
-            batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(1).to(device)
+            batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=False) \
+                .to(device).double()
+            batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(2).to(device)
 
-            lstm_state = seq.init_lstms(device=device, batch=1)
-            preds, _ = seq(batch_seq, lstm_state)
+            lstm_state = model.init_lstms(device=device, batch=1)
+            preds, _ = model(batch_seq, lstm_state)
 
             predval = preds.detach().squeeze().cpu().numpy()
             predictions.append(predval*100)
@@ -142,7 +139,7 @@ if __name__ == '__main__':
         # plot_next('preview/pred_next_%d.png' % n_iter, args.target, test_data, predictions)
 
         if eii % 10 == 0:
-            torch.save(seq, 'checkpoints/%s.pth' % seq.name)
+            torch.save(model, 'checkpoints/%s.pth' % model.name)
     print()
 
     log.close()

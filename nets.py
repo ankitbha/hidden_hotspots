@@ -89,6 +89,9 @@ class Series(nn.Module):
     name = 'series-v1'
     def __init__(self, batchsize, historylen, numsegments, hiddensize):
         super(Series, self).__init__()
+        '''
+        numsegments : this shoud be len(allsegments)
+        '''
 
         self.batchsize = batchsize
         self.historylen = historylen
@@ -97,12 +100,12 @@ class Series(nn.Module):
 
         self.lstm = nn.LSTM(hiddensize, hiddensize, num_layers=2)
         self.prelstm = nn.Sequential(*[
-            nn.Linear(numsegments, hiddensize),
-            # nn.ReLU(),
+            # infer based on nsegs-1 points
+            nn.Linear(numsegments-1, hiddensize),
         ])
         self.postlstm = nn.Sequential(*[
             nn.ReLU(),
-            nn.Linear(hiddensize, 1),
+            nn.Linear(hiddensize, 1),   # infer for 1 point given all other
         ])
 
     def init_lstms(self, device=None, grad=True, batch=None):
@@ -113,18 +116,16 @@ class Series(nn.Module):
 
         return (h_t, c_t)
 
-    def forward(self, input, lstm_states, future=0):
+    def forward(self, input, lstm_states):
         (h_t, c_t) = lstm_states
 
-        # print(input.size())
         x = self.prelstm(input)
 
-        # print(x.device, h_t.device, c_t.device)
         # Expected input: (histlen x batchsize x dense_t)
         x, (h_t, c_t) = self.lstm(x, (h_t, c_t))
-        # x = F.relu(x)
 
-        x = self.postlstm(last_x)
+        x = self.postlstm(x)
+        x = x.transpose(0, 1)
 
         return x, (h_t, c_t)
 
@@ -132,24 +133,30 @@ class Series(nn.Module):
     def demo():
         from torch import optim
 
-        model = Sequence(batchsize=2, historylen=5, numsegments=7, hiddensize=25)
-        lstm_states = model.init_lstms()
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model = Series(batchsize=2, historylen=5, numsegments=7, hiddensize=25).to(device)
+        lstm_states = model.init_lstms(device=device)
 
         # rand_input = torch.randn(2, 7, 5)  # (batchsize x # segs x histlen)
-        rand_input = torch.randn(5, 2, 7, requires_grad=True)  # (histlen x batchsize x  x #segs)
+        rand_input = torch.randn(5, 2, 6, requires_grad=True).to(device)  # (histlen x batchsize x  x #segs-1)
         print('Input:', rand_input.size())
-        pred, lstm_states = model(rand_input, lstm_states)
+        pred_series, lstm_states = model(rand_input, lstm_states)
 
-        print('Output:', pred.size())
+        print('Output:', pred_series.size())
 
         optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-        rand_labels = torch.randn(2, 1)  # (histlen x batchsize x  x #segs)
-        criterion = nn.MSELoss()(rand_labels, pred)
+        rand_labels = torch.randn(2, 5, 1).to(device)  # (batchsize x hist predicted)
+        criterion = nn.MSELoss()(pred_series, rand_labels)
         criterion.backward()
         optimizer.step()
 
 if __name__ == '__main__':
 
-    NextVal.demo()
+    # print('NextVal:')
+    # NextVal.demo()
+
+    print()
+    print('Series:')
+    Series.demo()
 
