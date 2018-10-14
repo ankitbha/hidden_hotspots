@@ -23,6 +23,32 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
+def plot_series(imgname, target, segments, predictions, loss, histlen):
+    plt.figure(figsize=(14, 7))
+    for sii, seg in enumerate(segments):
+        if sii != target:
+            plt.plot(seg*100, color='gray')
+    for sii, seg in enumerate(segments):
+        if sii == target:
+            plt.plot(seg*100, color='C0')
+
+    # mean of all other measurements at time tt
+    avgseries = np.zeros(segments.shape[1])
+    for sii, seg in enumerate(segments):
+        if sii == target: continue
+        avgseries += seg
+    avgseries /= (segments.shape[0]-1)
+    plt.plot(avgseries*100, color='C2')
+
+    # continuous lstm predictions
+    xs = list(range(len(predictions)))
+    assert len(xs) == len(predictions)
+    plt.plot(predictions, color='C1')
+
+    plt.gca().set_title('Loss: %.3f' % loss)
+    plt.savefig(imgname, bbox_inches='tight')
+    plt.close()
+
 if __name__ == '__main__':
     # set random seed to 0
     np.random.seed(0)
@@ -37,6 +63,7 @@ if __name__ == '__main__':
     parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for all; check configs...')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
+    parser.add_argument('--load', type=str, default=None)
     args = parser.parse_args()
 
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -112,23 +139,23 @@ if __name__ == '__main__':
         model.eval()
         lossavg = 0
 
-        predictions = []
+        continuous = []
+        lstm_state = model.init_lstms(device=device, batch=1)
         for ind in range(test_data.shape[1]-seqlen+1):
             batch_seq, batch_lbls = series_batch(
                 test_data,
                 args.target,
                 [ind],
-                history=args.history)
+                history=1) # feeding 1 at a time
             batch_seq = np.transpose(batch_seq, [2, 0, 1])
             batch_seq = Variable(torch.from_numpy(batch_seq), requires_grad=False) \
                 .to(device).double()
             batch_lbls = torch.from_numpy(batch_lbls).unsqueeze(2).to(device)
 
-            lstm_state = model.init_lstms(device=device, batch=1)
-            preds, _ = model(batch_seq, lstm_state)
+            preds, lstm_state = model(batch_seq, lstm_state)
 
             predval = preds.detach().squeeze().cpu().numpy()
-            predictions.append(predval*100)
+            continuous.append(predval*100)
 
             loss = criterion(preds, batch_lbls)
             lossavg += loss.detach().cpu().numpy()
@@ -136,7 +163,8 @@ if __name__ == '__main__':
         log.add_scalar('test/loss', lossavg, n_iter)
         print('\n   Testing Loss:  %.3f' % lossavg)
 
-        # plot_next('preview/pred_next_%d.png' % n_iter, args.target, test_data, predictions)
+        plot_series('preview/pred_seriescont_%d.png' % n_iter, args.target, test_data, continuous, lossavg, args.history)
+        # break
 
         if eii % 10 == 0:
             torch.save(model, 'checkpoints/%s.pth' % model.name)
