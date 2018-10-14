@@ -102,6 +102,12 @@ class Series(nn.Module):
         self.prelstm = nn.Sequential(*[
             # infer based on nsegs-1 points
             nn.Linear(numsegments-1, hiddensize),
+            nn.ReLU(),
+            nn.Linear(hiddensize, hiddensize),
+            nn.ReLU(),
+            nn.Linear(hiddensize, hiddensize),
+            nn.Dropout(0.5),
+            nn.ReLU(),
         ])
         self.postlstm = nn.Sequential(*[
             nn.ReLU(),

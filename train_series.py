@@ -66,8 +66,8 @@ if __name__ == '__main__':
     parser.add_argument('--load', type=str, default=None)
     args = parser.parse_args()
 
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
     log = SummaryWriter()
 
     # TODO: ability to train on all segments
@@ -89,12 +89,10 @@ if __name__ == '__main__':
     for eii in range(args.epochs):
 
         model.train()
-        seqlen = args.history + 1
-        stride = args.history // args.stride
-        assert stride > 2
+        seqlen = args.history
         numseqs = 0
         seqinds = []
-        for ind in range(0, train_data.shape[1] - seqlen, stride):
+        for ind in range(0, train_data.shape[1] - seqlen, args.stride):
             seqinds.append(ind)
             assert ind < train_data.shape[1]
             numseqs += 1
@@ -141,7 +139,7 @@ if __name__ == '__main__':
 
         continuous = []
         lstm_state = model.init_lstms(device=device, batch=1)
-        for ind in range(test_data.shape[1]-seqlen+1):
+        for ind in range(test_data.shape[1]):
             batch_seq, batch_lbls = series_batch(
                 test_data,
                 args.target,
