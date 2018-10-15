@@ -57,7 +57,7 @@ def plot_preview(epoch, segdef, target, segments, predictions, loss, histlen, cr
     pl = plt.plot(np.array(predictions)*norm, color='C1')
     legend.append((pl, 'target preds.'))
 
-    plt.gca().set_title('Pred MSE: %.3f    Avg MSE: %.3f' % (
+    plt.gca().set_title('LSTM NN MSE: %.3f    Naive avg. MSE: %.3f' % (
         loss*norm**2,
         avgloss*norm**2))
     plts, lbls = zip(*legend)
@@ -201,7 +201,7 @@ if __name__ == '__main__':
             break
 
         if eii % 10 == 0:
-            torch.save(model, 'checkpoints/%s.pth' % model.name)
+            torch.save(model, 'checkpoints/%s_targ-%d.pth' % (model.name, args.target))
     print()
 
     log.close()
