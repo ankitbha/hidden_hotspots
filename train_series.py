@@ -23,12 +23,15 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
-def plot_preview(imgname, target, segments, predictions, loss, histlen, criterion):
+def plot_preview(imgname, segdef, target, segments, predictions, loss, histlen, criterion):
+    legend = []
     plt.figure(figsize=(14, 7))
     for sii, seg in enumerate(segments):
         if sii != target:
-            plt.plot(seg*100, color='#CCCCCC')
-    plt.plot(segments[target, :]*100, color='C0')
+            pl = plt.plot(seg*100, color='#CCCCCC')
+            legend.append((pl, segdef['locations'][sii][0]))
+    pl = plt.plot(segments[target, :]*100, color='C0')
+    legend.append((pl, segdef['locations'][target][0] + ' (target)'))
 
     # mean of all other measurements at time tt
     avgseries = np.zeros(segments.shape[1])
@@ -36,7 +39,8 @@ def plot_preview(imgname, target, segments, predictions, loss, histlen, criterio
         if sii == target: continue
         avgseries += seg
     avgseries /= (segments.shape[0]-1)
-    plt.plot(avgseries*100, color='C2')
+    pl = plt.plot(avgseries*100, color='C2')
+    legend.append((pl, 'avg. of non-target'))
     avgloss = 0
     for tii, val in enumerate(avgseries):
         trueval = segments[target, tii]*100
@@ -47,9 +51,13 @@ def plot_preview(imgname, target, segments, predictions, loss, histlen, criterio
     # continuous lstm predictions
     xs = list(range(len(predictions)))
     assert len(xs) == len(predictions)
-    plt.plot(predictions, color='C1')
+    pl = plt.plot(predictions, color='C1')
+    legend.append((pl, 'target preds.'))
 
     plt.gca().set_title('Pred Loss: %.3f    Avg Loss: %.3f' % (loss, avgloss))
+    plts, lbls = zip(*legend)
+    plts = [pl[0] for pl in plts] # ?? actual ref is first elem?
+    plt.legend(plts, lbls)
     plt.savefig(imgname, bbox_inches='tight')
     plt.close()
 
@@ -171,6 +179,7 @@ if __name__ == '__main__':
 
         if eii % 10 == 0:
             plot_preview('preview/pred_seriescont_%d.png' % n_iter,
+                use_segment,
                 args.target,
                 test_data,
                 continuous,
