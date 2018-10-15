@@ -23,14 +23,12 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
-def plot_series(imgname, target, segments, predictions, loss, histlen):
+def plot_preview(imgname, target, segments, predictions, loss, histlen, criterion):
     plt.figure(figsize=(14, 7))
     for sii, seg in enumerate(segments):
         if sii != target:
-            plt.plot(seg*100, color='gray')
-    for sii, seg in enumerate(segments):
-        if sii == target:
-            plt.plot(seg*100, color='C0')
+            plt.plot(seg*100, color='#CCCCCC')
+    plt.plot(segments[target, :]*100, color='C0')
 
     # mean of all other measurements at time tt
     avgseries = np.zeros(segments.shape[1])
@@ -39,13 +37,19 @@ def plot_series(imgname, target, segments, predictions, loss, histlen):
         avgseries += seg
     avgseries /= (segments.shape[0]-1)
     plt.plot(avgseries*100, color='C2')
+    avgloss = 0
+    for tii, val in enumerate(avgseries):
+        trueval = segments[target, tii]*100
+        loss_tensor = criterion(torch.tensor(val), torch.tensor(trueval))
+        avgloss += loss_tensor.cpu().numpy()
+    avgloss /= len(avgseries)
 
     # continuous lstm predictions
     xs = list(range(len(predictions)))
     assert len(xs) == len(predictions)
     plt.plot(predictions, color='C1')
 
-    plt.gca().set_title('Loss: %.3f' % loss)
+    plt.gca().set_title('Pred Loss: %.3f    Avg Loss: %.3f' % (loss, avgloss))
     plt.savefig(imgname, bbox_inches='tight')
     plt.close()
 
@@ -64,6 +68,8 @@ if __name__ == '__main__':
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     parser.add_argument('--load', type=str, default=None)
+    parser.add_argument('--once', dest='once', action='store_true')
+    parser.set_defaults(once=False)
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -161,8 +167,19 @@ if __name__ == '__main__':
         log.add_scalar('test/loss', lossavg, n_iter)
         print('\n   Testing Loss:  %.3f' % lossavg)
 
-        plot_series('preview/pred_seriescont_%d.png' % n_iter, args.target, test_data, continuous, lossavg, args.history)
-        # break
+        # fname = 'pred_%d.png' % n_iter
+
+        if eii % 10 == 0:
+            plot_preview('preview/pred_seriescont_%d.png' % n_iter,
+                args.target,
+                test_data,
+                continuous,
+                lossavg,
+                args.history,
+                criterion)
+
+        if args.once:
+            break
 
         if eii % 10 == 0:
             torch.save(model, 'checkpoints/%s.pth' % model.name)

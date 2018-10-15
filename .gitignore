@@ -5,7 +5,7 @@ __pycache__/
 *.png
 runs
 *.DS_Store
-
+*.pth
 # C extensions
 *.so
 
