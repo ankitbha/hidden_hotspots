@@ -37,7 +37,7 @@ SEGMENTS = [
             ('U.S. Embassy', '16_441B'),
             ('Senjuti Banerjee', '06_0330'),
             ('Roy Imaging', '09_8220'),
-            ('Vihara', '10_FFB7'),
+            ('Vihara', '10_FF87'),
             ('Sujoy Home', '02_E121'),
             ('Prateek Mittal', '05_508F'),
             ('Nischal', '15_52D7'),

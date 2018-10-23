@@ -26,7 +26,7 @@ def find_by_id(idname):
 	for fpath in locfiles:
 		if idname in fpath:
 			return fpath
-	raise Exception('No file found w/ name: %s' % locname)
+	raise Exception('No file found w/ name: %s' % idname)
 
 def date_in_seconds(dobj):
 	return time.mktime(dobj.timetuple())
