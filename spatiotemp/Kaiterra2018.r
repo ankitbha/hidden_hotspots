@@ -41,6 +41,10 @@ range(kt.full$ts)
 tw.vizbd <- as.POSIXct(c('2018-03-01 00:00:00',
                          '2018-09-26 00:00:00'),tz="Asia/Kolkata")
 
+tw.bd <- as.POSIXct(c('2018-05-11 00:00:00',
+                      '2018-06-10 00:00:00'),tz="Asia/Kolkata")
+# ^ tw suggested by Shiva
+
 pdf('Kaiterra_15min_SensorsUptime.pdf',width=14,height=7)
 par(mfrow=c(1,2))
 # by sensor
@@ -57,6 +61,7 @@ for (j in 1:nb.sens){
   points(x=kt.full$ts[ind][ind.na],y=rep(j,sum(ind.na)),pch="|",col='red')
   message(names.sens[j],' | ',min(kt.full$ts[ind]),' - ',max(kt.full$ts[ind]))
 }
+abline(v=tw.bd,lty=2)
 legend('topleft',c('downtime','uptime','down -> up'),
        pch=c(NA,19,NA),pt.cex=c(1,0.4,1),lty=c(1,NA,1),col=c('grey',1,'red'))
 
@@ -74,6 +79,7 @@ for (j in 1:nb.loc){
   points(x=kt.full$ts[ind][ind.na],y=rep(j,sum(ind.na)),pch="|",col='red')
   message(names.loc[j],' | ',min(kt.full$ts[ind]),' - ',max(kt.full$ts[ind]))
 }
+abline(v=tw.bd,lty=2)
 legend('topleft',c('downtime','uptime','down -> up'),
        pch=c(NA,19,NA),pt.cex=c(1,0.4,1),lty=c(1,NA,1),col=c('grey',1,'red'))
 
@@ -94,16 +100,18 @@ diff(tw.bd) # exactly 30 days
 as.numeric(diff(tw.bd))*24*4
 # ^ 30 days = 2880 values not accounting for NAs
 
-discarded.sens <- names.sens%in%c('FBCB','59F2','8220','407D','CEDB')
+discarded.sloc <- c('01_FBCB','07_59F2','09_8220','16_407D','17_CEDB','22_3384')
+discarded.sens <- names.sens%in%c('FBCB','59F2','8220','407D','CEDB','3384')
+discarded.loc <- names.loc%in%c('1','7','9','16','17','22')
 
 # show tw and 4 discarded sensors
 pdf('Kaiterra_15min_TW_DiscardedSensors.pdf',width=7,height=7)
 plot(x=tw.bd,y=c(1,nb.sens),type='n', # x=tw.vizbd
-     xlab='Total time period',ylab='Sensor',yaxt='n',
-     main='Kaiterra Mar-Sep 2018, suggested tw and discared sensors')
+     xlab='Restricted time period',ylab='Sensor',yaxt='n',
+     main='Kaiterra Mar-Sep 2018, suggested tw and discarded sensors')
 axis(side=2,at=1:nb.sens,labels=NA,las=1)
 mtext(side=2,at=1:nb.sens,names.sens,las=1,line=0.7,
-      col=ifelse(discarded.sens,'grey','black'))
+      col=ifelse(discarded.sens,'red','blue'))
 # ^ discared sensors in red
 for (j in 1:nb.sens){
   ind <- kt.full$s_id_short==names.sens[j]
@@ -148,16 +156,16 @@ df.latlon.sp <- spTransform(df.latlon,osm())
 
 pdf('Kaiterra_15min_Map_DiscardedSensors.pdf',width=9,height=7)
 plot(map.delhi,removeMargin=F)
-points(df.latlon.sp,pch=19,col=ifelse(discarded.sens,'red','blue')) # our sensors
+points(df.latlon.sp,pch=19,col=ifelse(discarded.loc,'red','blue')) # our sensors
 text(names.loc,x=df.latlon.sp@coords[1:j,1],y=df.latlon.sp@coords[1:j,2],
-     col=ifelse(discarded.sens,'red','blue'),cex=0.5,
+     col=ifelse(discarded.loc,'red','blue'),cex=0.5,
      pos=c(4,2,3,2,4,4,2,4,4,1,1,2,1,4,4,4,1,4,4,2,2,4))
 axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
 axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
 title(main="Kaiterra sensors Mar-Sep 2018, tw 2018-05-11 - 2018-06-10",
       xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
 legend('bottomright',c('Discarded','Kept'),pch=c(19,19),bg='white',
-       col=ifelse(discarded.sens,'red','blue'))
+       col=ifelse(discarded.loc,'red','blue'))
 dev.off()
 
 
