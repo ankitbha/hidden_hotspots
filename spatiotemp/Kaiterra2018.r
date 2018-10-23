@@ -1,3 +1,174 @@
+#////////////////////////////////////////////////////////////////////
+#### 2018-10-23 Kaiterra updated data Apr-Sep 2018, find good tw ####
+#////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+pafdta <- '/Delhi Pollution/08_Data_Analysis/dtaFiles/Aug_2018_Kaiterra/'
+
+library(haven) # load Stata .dta via read_dta()
+
+### load full data and explore
+kt.full <- data.frame(na.omit(read_dta(
+  paste0(paf2drop,pafdta,'pilot2_2018_panel_15min_28_Sep_2018.dta'),
+  encoding='latin1')))
+kt.full$ts <- as.POSIXct(strptime(kt.full$timestamp_round,
+                                  format='%Y-%m-%d %H:%M:%S',
+                                  tz="Asia/Kolkata"))
+# ^ convert to correct class with IST time zone
+# kt.full$ts <- format(kt.full$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat
+
+range(kt.full$ts) # overview of full time period
+
+str(kt.full,1)
+
+table(kt.full$loc_s_id)
+length(unique(kt.full$loc_s_id))
+# ^ loc_s_id as unique identifier for location-sensor pairs
+
+# names.loc <- sprintf('%02g',unique(kt.full$loc_id))
+names.loc <- as.character(unique(kt.full$loc_id))
+names.sens <- unique(kt.full$s_id_short)
+nb.loc <- length(names.loc) # 22 locations
+nb.sens <- length(names.sens) # 23 sensors now overall
+
+
+### visualize available data points per sensor
+range(kt.full$ts)
+tw.vizbd <- as.POSIXct(c('2018-03-01 00:00:00',
+                         '2018-09-26 00:00:00'),tz="Asia/Kolkata")
+
+pdf('Kaiterra_15min_SensorsUptime.pdf',width=14,height=7)
+par(mfrow=c(1,2))
+# by sensor
+plot(x=tw.vizbd,y=c(1,nb.sens),type='n', # x=range(kt.full$ts)
+     xlab='Total time period',ylab='Sensor',yaxt='n',
+     main='Kaiterra Mar-Sep 2018, up and down time by sensor')
+axis(side=2,at=1:nb.sens,labels=names.sens,las=1)
+for (j in 1:nb.sens){
+  ind <- kt.full$s_id_short==names.sens[j]
+  ind.na <- c(T,diff(kt.full$ts[ind])!=15) # contiguous = time lag 15
+  arrows(x0=min(kt.full$ts[ind]),x1=max(kt.full$ts[ind]),y0=j,y1=j,
+         col='grey',angle=90,code=3,length=0.05,lty=1)
+  points(x=kt.full$ts[ind],y=rep(j,sum(ind)),pch=19,cex=0.1)
+  points(x=kt.full$ts[ind][ind.na],y=rep(j,sum(ind.na)),pch="|",col='red')
+  message(names.sens[j],' | ',min(kt.full$ts[ind]),' - ',max(kt.full$ts[ind]))
+}
+legend('topleft',c('downtime','uptime','down -> up'),
+       pch=c(NA,19,NA),pt.cex=c(1,0.4,1),lty=c(1,NA,1),col=c('grey',1,'red'))
+
+# by location
+plot(x=tw.vizbd,y=c(1,nb.loc),type='n',
+     xlab='Total time period',ylab='Location',yaxt='n',
+     main='Kaiterra Apr-Jul 2018, up and down time by location')
+axis(side=2,at=1:nb.loc,labels=names.loc,las=1)
+for (j in 1:nb.loc){
+  ind <- kt.full$loc_id==names.loc[j]
+  ind.na <- c(T,diff(kt.full$ts[ind])!=15) # contiguous = time lag 15
+  arrows(x0=min(kt.full$ts[ind]),x1=max(kt.full$ts[ind]),y0=j,y1=j,
+         col='grey',angle=90,code=3,length=0.05,lty=1)
+  points(x=kt.full$ts[ind],y=rep(j,sum(ind)),pch=19,cex=0.1)
+  points(x=kt.full$ts[ind][ind.na],y=rep(j,sum(ind.na)),pch="|",col='red')
+  message(names.loc[j],' | ',min(kt.full$ts[ind]),' - ',max(kt.full$ts[ind]))
+}
+legend('topleft',c('downtime','uptime','down -> up'),
+       pch=c(NA,19,NA),pt.cex=c(1,0.4,1),lty=c(1,NA,1),col=c('grey',1,'red'))
+
+# ^ candidate tw: mid-May and mid-July
+par(mfrow=c(1,1))
+dev.off()
+
+
+
+### tw suggested by Shiva in email 2018-10-23
+# Removed ('01_FBCB', '07_59F2', '09_8220', '16_407D', '17_CEDB') out of 25 sensors
+# 2018-05-11, 30 days: 24442/38420 (valid / total)
+
+tw.bd <- as.POSIXct(c('2018-05-11 00:00:00',
+                      '2018-06-10 00:00:00'),tz="Asia/Kolkata")
+
+diff(tw.bd) # exactly 30 days
+as.numeric(diff(tw.bd))*24*4
+# ^ 30 days = 2880 values not accounting for NAs
+
+discarded.sens <- names.sens%in%c('FBCB','59F2','8220','407D','CEDB')
+
+# show tw and 4 discarded sensors
+pdf('Kaiterra_15min_TW_DiscardedSensors.pdf',width=7,height=7)
+plot(x=tw.bd,y=c(1,nb.sens),type='n', # x=tw.vizbd
+     xlab='Total time period',ylab='Sensor',yaxt='n',
+     main='Kaiterra Mar-Sep 2018, suggested tw and discared sensors')
+axis(side=2,at=1:nb.sens,labels=NA,las=1)
+mtext(side=2,at=1:nb.sens,names.sens,las=1,line=0.7,
+      col=ifelse(discarded.sens,'grey','black'))
+# ^ discared sensors in red
+for (j in 1:nb.sens){
+  ind <- kt.full$s_id_short==names.sens[j]
+  ind.na <- c(T,diff(kt.full$ts[ind])!=15) # contiguous = time lag 15
+  arrows(x0=min(kt.full$ts[ind]),x1=max(kt.full$ts[ind]),y0=j,y1=j,
+         col='grey',angle=90,code=3,length=0.05,lty=1)
+  points(x=kt.full$ts[ind],y=rep(j,sum(ind)),pch=19,cex=0.1)
+  points(x=kt.full$ts[ind][ind.na],y=rep(j,sum(ind.na)),pch="|",col='red')
+}
+abline(v=tw.bd,lty=2)
+dev.off()
+
+
+
+### create df of locations with lat/lon
+kt.loc <- data.frame('loc'=names.loc,stringsAsFactors=F)
+
+table(round(kt.full$longitude,4)) # looks ok
+table(round(kt.full$latitude,4)) # looks ok
+
+for (j in 1:nb.loc){
+  kt.loc$lon[j] <- kt.full$longitude[kt.full$loc_id==names.loc[j]][1]
+  kt.loc$lat[j] <- kt.full$latitude[kt.full$loc_id==names.loc[j]][1]
+}
+
+
+### plot all locations on map of Delhi
+library(sp)
+library(rgdal)
+library(OpenStreetMap)
+
+range(kt.full$latitude)
+range(kt.full$longitude)
+corners.delhi <- list('topleft'=c(28.41, 77.04), # lat/lon
+                      'botright'=c(28.64, 77.38)) # lat/lon
+map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
+                     zoom=NULL,type='stamen-toner') # type='osm'
+
+df.latlon <- SpatialPoints(kt.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.latlon.sp <- spTransform(df.latlon,osm())
+
+
+pdf('Kaiterra_15min_Map_DiscardedSensors.pdf',width=9,height=7)
+plot(map.delhi,removeMargin=F)
+points(df.latlon.sp,pch=19,col=ifelse(discarded.sens,'red','blue')) # our sensors
+text(names.loc,x=df.latlon.sp@coords[1:j,1],y=df.latlon.sp@coords[1:j,2],
+     col=ifelse(discarded.sens,'red','blue'),cex=0.5,
+     pos=c(4,2,3,2,4,4,2,4,4,1,1,2,1,4,4,4,1,4,4,2,2,4))
+axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+title(main="Kaiterra sensors Mar-Sep 2018, tw 2018-05-11 - 2018-06-10",
+      xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+legend('bottomright',c('Discarded','Kept'),pch=c(19,19),bg='white',
+       col=ifelse(discarded.sens,'red','blue'))
+dev.off()
+
+
+### here!!! extract tw from kt.full, pad with NAs, save data to txt, save minimal envir
+
+
+
+
+
+
+
 #//////////////////////////////////////////////////////////////////////
 #### 2018-08-09 Kaiterra sensors, fit STHM to July padded tw, v0.4 ####
 #//////////////////////////////////////////////////////////////////////
