@@ -117,10 +117,9 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 def create_dataset_gov(
 	start='08/01/2018', end='10/01/2018', 
 	split=0.8, fillmethod=pad_valid, 
-	exclude=['Sirifort, New Delhi - CPCB']):
+	exclude=['Sirifort, New Delhi - CPCB', 'Punjabi Bagh, Delhi - DPCC']):
 	import json
 
-	raw_segments = [] # collection of segments
 	t0 = datetime.strptime(start, '%m/%d/%Y')
 	tf = datetime.strptime(end, '%m/%d/%Y')
 	print(' [*] Loading govdata from: %s to %s' % (start, end))
@@ -175,13 +174,13 @@ def create_dataset_gov(
 	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
 	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
 
-	train_meta = []
-	test_meta = []
-	for seg_metadata in raw_segments:
-		train_meta.append(seg_metadata[:splitind])
-		test_meta.append(seg_metadata[splitind:])
+	# train_meta = []
+	# test_meta = []
+	# for seg_metadata in raw_segments:
+	# 	train_meta.append(seg_metadata[:splitind])
+	# 	test_meta.append(seg_metadata[splitind:])
 
-	return (train_data, test_data), (train_meta, test_meta)
+	return (train_data, test_data), (None, None, [__govnames[gi] for gi in selected])
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''
