@@ -62,10 +62,20 @@ def plot_preview(epoch, segdef, target, segments, predictions, loss, histlen, cr
         avgloss*norm**2))
     plts, lbls = zip(*legend)
     plts = [pl[0] for pl in plts] # ?? actual ref is first elem?
-    plt.legend(plts, lbls)
+    plt.legend(plts, lbls, prop={'size': 6})
+    plt.xticks([0, len(predictions)-1], [startstr, dstr])
     plt.savefig(imgname, bbox_inches='tight')
     plt.savefig(currname, bbox_inches='tight')
     plt.close()
+
+    for sii, seg in enumerate(segments):
+        plt.figure(figsize=(14, 4))
+        plt.title(locations[sii])
+        plt.plot(seg*norm)
+        plt.savefig('debug/%s.jpg' % locations[sii], bbox_inches='tight')
+        plt.close()
+
+    return avgloss
 
 if __name__ == '__main__':
     # set random seed to 0
@@ -91,9 +101,27 @@ if __name__ == '__main__':
     log = SummaryWriter()
 
     # TODO: ability to train on all segments
-    use_segment = SEGMENTS[args.segment]
-    numsegments = len(use_segment['locations'])
-    (train_data, test_data), metadata = create_dataset(use_segment)
+    if args.segment == -1:
+        (train_data, test_data), metadata = create_dataset_gov()
+        numsegments = train_data.shape[0]
+        state_date, end_date = '08/01/2018','10/01/2018'
+        location_names = metadata[2]
+        time_interval = 15        # 15 minutes
+    elif args.segment == -2: # gov + our data
+        USESEG = 0
+        bad_govs = EXCLUDE[USESEG]
+        seg = SEGMENTS[USESEG]
+        assert args.target < len(seg['locations'])
+        (train_data, test_data), (_, _, location_names) = create_dataset_joint(
+            seg, exclude=bad_govs)
+        numsegments = train_data.shape[0]
+        state_date, end_date = seg['start'], seg['end']
+        time_interval = 5        # gov data upsamped to 5 mins
+    else:
+        # FIXME: update set metadata variables
+        use_segment = SEGMENTS[args.segment]
+        numsegments = len(use_segment['locations'])
+        (train_data, test_data), metadata = create_dataset(use_segment)
 
     if args.load is not None:
         print(' Loading:', args.load)

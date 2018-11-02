@@ -115,8 +115,8 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 	return (train_data, test_data), (train_meta, test_meta)
 
 def create_dataset_gov(
-	start='08/01/2018', end='10/01/2018', 
-	split=0.8, fillmethod=pad_valid, 
+	start='08/01/2018', end='10/01/2018',
+	split=0.8, fillmethod=pad_valid,
 	exclude=['Sirifort, New Delhi - CPCB', 'Punjabi Bagh, Delhi - DPCC']):
 	import json
 
@@ -125,7 +125,7 @@ def create_dataset_gov(
 	print(' [*] Loading govdata from: %s to %s' % (start, end))
 	with open('data/gov.json') as fl:
 		govdata = json.load(fl)
-	
+
 	filtered = []
 	for timeentry in govdata:
 		te = datetime.strptime(timeentry['date'], '%d-%m-%Y %H:%M')
@@ -137,7 +137,7 @@ def create_dataset_gov(
 	print(' [*] Expecting %d entries at 15min intervals' % __expected)
 	print(' [*] Found %d entries in this range' % len(filtered))
 	assert abs(__expected - len(filtered)) <= 1
-	
+
 	__govnames = [ent['location'] for ent in filtered[0]['values']]
 	print(' [*] Found %d gov locations' % len(__govnames))
 	for gname in __govnames:
@@ -153,10 +153,10 @@ def create_dataset_gov(
 		ind = 0
 		for gii, govindex in enumerate(selected):
 			byloc = timeentry['values'][govindex]
-			
+
 			if byloc['location'] in exclude: continue
-			
-			if byloc['pm25'] is None: 
+
+			if byloc['pm25'] is None:
 				datamat[gii, tii] = -1
 				__missingstat[gii] += 1
 			else:
@@ -166,9 +166,9 @@ def create_dataset_gov(
 
 	for gii, govindex in enumerate(selected):
 		print('    * Available: %.1f%%  Location: %s' % (
-			(len(filtered) - __missingstat[gii]) / len(filtered) * 100.0, 
+			(len(filtered) - __missingstat[gii]) / len(filtered) * 100.0,
 			__govnames[govindex]))
-	
+
 	for sii, segment in enumerate(datamat):
 		fillmethod(segment)
 	datamat /= 100.0 # normalize under 100
@@ -184,6 +184,27 @@ def create_dataset_gov(
 	# 	test_meta.append(seg_metadata[splitind:])
 
 	return (train_data, test_data), (None, None, [__govnames[gi] for gi in selected])
+
+def create_dataset_joint(segdef, split=0.8, fillmethod=pad_valid, exclude=[]):
+	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
+	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
+
+	(ourdata, _), (_, _) = create_dataset(segdef, split=1.0, fillmethod=fillmethod)
+	(govdata, _), (_, _, govnames) = create_dataset_gov(start=segdef['start'], end=segdef['end'], split=1.0, fillmethod=fillmethod, exclude=exclude)
+
+	# govdata is in 15 min intervals; to preserve the resolution of our data, we upsamp the govdata to match
+	upsamp = np.repeat(govdata, 3, axis=1)[:, :-2] # last two OOB
+	assert ourdata.shape[1] == upsamp.shape[1]
+
+	# print(ourdata.shape, upsamp.shape)
+	datamat = np.concatenate([ourdata, upsamp], axis=0)
+
+	splitind = int(datamat.shape[1] * split)
+	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
+	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
+
+	ournames = [ent[0] for ent in segdef['locations']]
+	return (train_data, test_data), (None, None, ournames + govnames)
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''
@@ -233,7 +254,11 @@ if __name__ == '__main__':
 	BATCHSIZE = 32
 	(train, test), metadata = create_dataset(SEGMENTS[0])
 
-	inds = [0] * BATCHSIZE
-	segments, labels = nextval_batch(train, 0, inds, history=3)
-	print('X - segments:', segments.shape)
-	print('Y - labels  :', labels.shape)
+	# inds = [0] * BATCHSIZE
+	# segments, labels = nextval_batch(train, 0, inds, history=3)
+	# print('X - segments:', segments.shape)
+	# print('Y - labels  :', labels.shape)
+
+	# (train, test), metadata = create_dataset_gov()
+
+	create_dataset_joint(SEGMENTS[0])
