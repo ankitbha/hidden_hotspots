@@ -48,3 +48,26 @@ SEGMENTS = [
         'end': '07/24/2018',
     },
 ]
+
+
+EXCLUDE = {
+    0: [
+        'Sirifort, New Delhi - CPCB',
+        'Punjabi Bagh, Delhi - DPCC',
+
+        'Lodhi Road, New Delhi - IMD',
+        'Jawaharlal Nehru Stadium, Delhi - DPCC',
+        'Lodhi Road, New Delhi - IMD',
+        'Sri Aurobindo Marg, Delhi - DPCC',
+        'Dr. Karni Singh Shooting Range, Delhi - DPCC'
+    ],
+    2: [
+        'Sirifort, New Delhi - CPCB',
+        'Punjabi Bagh, Delhi - DPCC',
+
+        # 'Lodhi Road, New Delhi - IMD',
+        # 'Jawaharlal Nehru Stadium, Delhi - DPCC',
+        # 'Lodhi Road, New Delhi - IMD',
+        # 'Sri Aurobindo Marg, Delhi - DPCC',
+    ]
+}
