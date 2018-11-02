@@ -26,7 +26,7 @@ def find_by_id(idname):
 	for fpath in locfiles:
 		if idname in fpath:
 			return fpath
-	raise Exception('No file found w/ name: %s' % locname)
+	raise Exception('No file found w/ name: %s' % idname)
 
 def date_in_seconds(dobj):
 	return time.mktime(dobj.timetuple())
@@ -115,8 +115,13 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 	return (train_data, test_data), (train_meta, test_meta)
 
 def create_dataset_gov(
+<<<<<<< HEAD
 	start='08/01/2018', end='10/01/2018',
 	split=0.8, fillmethod=pad_valid,
+=======
+	start='08/01/2018', end='10/01/2018',
+	split=0.8, fillmethod=pad_valid,
+>>>>>>> master
 	exclude=['Sirifort, New Delhi - CPCB', 'Punjabi Bagh, Delhi - DPCC']):
 	import json
 
@@ -125,7 +130,11 @@ def create_dataset_gov(
 	print(' [*] Loading govdata from: %s to %s' % (start, end))
 	with open('data/gov.json') as fl:
 		govdata = json.load(fl)
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> master
 	filtered = []
 	for timeentry in govdata:
 		te = datetime.strptime(timeentry['date'], '%d-%m-%Y %H:%M')
@@ -137,7 +146,11 @@ def create_dataset_gov(
 	print(' [*] Expecting %d entries at 15min intervals' % __expected)
 	print(' [*] Found %d entries in this range' % len(filtered))
 	assert abs(__expected - len(filtered)) <= 1
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> master
 	__govnames = [ent['location'] for ent in filtered[0]['values']]
 	print(' [*] Found %d gov locations' % len(__govnames))
 	for gname in __govnames:
@@ -252,7 +265,12 @@ def series_batch(datamat, target, inds, history=5):
 
 if __name__ == '__main__':
 	BATCHSIZE = 32
-	(train, test), metadata = create_dataset(SEGMENTS[0])
+	# (train, test), metadata = create_dataset(SEGMENTS[0])
+
+	# inds = [0] * BATCHSIZE
+	# segments, labels = nextval_batch(train, 0, inds, history=3)
+	# print('X - segments:', segments.shape)
+	# print('Y - labels  :', labels.shape)
 
 	# inds = [0] * BATCHSIZE
 	# segments, labels = nextval_batch(train, 0, inds, history=3)

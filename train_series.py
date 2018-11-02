@@ -23,18 +23,26 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
-def plot_preview(epoch, segdef, target, segments, predictions, loss, histlen, criterion, norm=100.0):
+def plot_preview(epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5):
+    (start, end, locations) = seginfo
     imgname = 'preview/pred_%d_epoch_%d.png' % (args.target, epoch)
     currname = 'pred_%d_best.png' % (args.target)
+
+    tf = time.mktime(datetime.strptime(end, '%m/%d/%Y').timetuple())
+    t0 = tf - interval * 60 * len(predictions)
+    startstr = datetime.fromtimestamp(t0).strftime("%m/%d/%Y")
+    dstr = datetime.fromtimestamp(tf).strftime("%m/%d/%Y")
+    # print(startstr, dstr)
+    # print()
 
     legend = []
     plt.figure(figsize=(14, 7))
     for sii, seg in enumerate(segments):
         if sii != target:
             pl = plt.plot(seg*norm, color='#CCCCCC')
-            legend.append((pl, segdef['locations'][sii][0]))
+            legend.append((pl, locations[sii]))
     pl = plt.plot(segments[target, :]*norm, color='C0')
-    legend.append((pl, segdef['locations'][target][0] + ' (target)'))
+    legend.append((pl, locations[target] + ' (target)'))
 
     # mean of all other measurements at time tt
     avgseries = np.zeros(segments.shape[1])
@@ -88,7 +96,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for all; check configs...')
+    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for govdata; check configs...')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     parser.add_argument('--load', type=str, default=None)
@@ -190,6 +198,7 @@ if __name__ == '__main__':
 
         model.eval()
         series_loss = 0
+        series_mape = 0
         continuous = []
         lstm_state = model.init_lstms(device=device, batch=1)
         for ind in range(test_data.shape[1]):
@@ -210,26 +219,40 @@ if __name__ == '__main__':
 
             loss = criterion(preds, batch_lbls)
             series_loss += loss.detach().cpu().numpy()
+            batch_lbls = batch_lbls.detach().squeeze().cpu().numpy()
+            preds = preds.detach().squeeze().cpu().numpy()
+            series_mape += np.abs((preds - batch_lbls) / batch_lbls)
         series_loss /= (test_data.shape[1] - seqlen)
+        series_mape /= (test_data.shape[1] - seqlen)
+        series_mape *= 100.0
         log.add_scalar('test/loss', series_loss, n_iter)
-        print('\n   Testing Loss:  %.3f' % (series_loss * 100.0**2))
+        print('\n   Testing Loss:  %.3f      Testing MAPE: %.1f%%' % (series_loss * 100.0**2, series_mape))
 
         if eii % 10 == 0:
-            plot_preview(
+            mse_avg = plot_preview(
                 eii,
-                use_segment,
+                (state_date, end_date, location_names),
                 args.target,
                 test_data,
                 continuous,
                 series_loss,
                 args.history,
-                criterion)
+                criterion,
+                interval=time_interval)
+
+            with open('outputs/seg_%d_targ_%d.txt' % (args.segment, args.target), 'w') as fl:
+                fl.write('MAPE:%.3f\n' % series_mape)
+                fl.write('MSE_TEST:%.3f\n' % (series_loss * 100.0**2))
+                fl.write('MSE_AVG:%.3f\n' % (mse_avg * 100.0**2))
+                fl.write('MSE_TRAIN:%.3f\n' % (loss.item() * 100.0**2))
 
         if args.once:
             break
 
         if eii % 10 == 0:
             torch.save(model, 'checkpoints/%s_targ-%d.pth' % (model.name, args.target))
+
+
     print()
 
     log.close()
