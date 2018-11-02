@@ -114,6 +114,77 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 
 	return (train_data, test_data), (train_meta, test_meta)
 
+def create_dataset_gov(
+	start='08/01/2018', end='10/01/2018', 
+	split=0.8, fillmethod=pad_valid, 
+	exclude=['Sirifort, New Delhi - CPCB', 'Punjabi Bagh, Delhi - DPCC']):
+	import json
+
+	t0 = datetime.strptime(start, '%m/%d/%Y')
+	tf = datetime.strptime(end, '%m/%d/%Y')
+	print(' [*] Loading govdata from: %s to %s' % (start, end))
+	with open('data/gov.json') as fl:
+		govdata = json.load(fl)
+	
+	filtered = []
+	for timeentry in govdata:
+		te = datetime.strptime(timeentry['date'], '%d-%m-%Y %H:%M')
+		if te < t0 or te > tf: continue
+		filtered.append(timeentry)
+
+	assert len(filtered) > 0
+	__expected = (tf - t0).total_seconds() / 60 / 15
+	print(' [*] Expecting %d entries at 15min intervals' % __expected)
+	print(' [*] Found %d entries in this range' % len(filtered))
+	assert abs(__expected - len(filtered)) <= 1
+	
+	__govnames = [ent['location'] for ent in filtered[0]['values']]
+	print(' [*] Found %d gov locations' % len(__govnames))
+	for gname in __govnames:
+		print('    * %s %s' % ('' if gname not in exclude else '(excluded)', gname))
+	selected = [ind for ind, name in enumerate(__govnames) if name not in exclude]
+	__numgovs = len(selected)
+	assert len(selected) == len(__govnames) - len(exclude)
+	print(' [*] Tracking %d gov locations' % __numgovs)
+	datamat = np.zeros((__numgovs, len(filtered)))
+
+	__missingstat = [0] * __numgovs
+	for tii, timeentry in enumerate(filtered):
+		ind = 0
+		for gii, govindex in enumerate(selected):
+			byloc = timeentry['values'][govindex]
+			
+			if byloc['location'] in exclude: continue
+			
+			if byloc['pm25'] is None: 
+				datamat[gii, tii] = -1
+				__missingstat[gii] += 1
+			else:
+				val = byloc['pm25']
+				if val == 0: val = 1
+				datamat[gii, tii] = val
+
+	for gii, govindex in enumerate(selected):
+		print('    * Available: %.1f%%  Location: %s' % (
+			(len(filtered) - __missingstat[gii]) / len(filtered) * 100.0, 
+			__govnames[govindex]))
+	
+	for sii, segment in enumerate(datamat):
+		fillmethod(segment)
+	datamat /= 100.0 # normalize under 100
+
+	splitind = int(datamat.shape[1] * split)
+	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
+	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
+
+	# train_meta = []
+	# test_meta = []
+	# for seg_metadata in raw_segments:
+	# 	train_meta.append(seg_metadata[:splitind])
+	# 	test_meta.append(seg_metadata[splitind:])
+
+	return (train_data, test_data), (None, None, [__govnames[gi] for gi in selected])
+
 def nextval_batch(datamat, target, inds, history=5):
 	'''
 	inds - array of starting indicies to get sequences from
