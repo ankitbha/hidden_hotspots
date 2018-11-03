@@ -22,9 +22,10 @@ from datetime import datetime
 import time
 
 def find_by_id(idname):
-	locfiles = glob('./data/kaiterra*.csv')
+	locfiles = glob('./data/kaiterra_field*.csv')
 	for fpath in locfiles:
 		if idname in fpath:
+			# print(fpath)
 			return fpath
 	raise Exception('No file found w/ name: %s' % idname)
 
@@ -40,7 +41,7 @@ def pad_valid(series):
 			series[lastvalid+1:ind] = val
 		if val != -1: lastvalid = ind
 
-def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
+def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 	'''
 	TODO: Specify neighbors in neighborlist
 		otherwise all are used
@@ -58,6 +59,7 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 		with open(fpath) as fl:
 			fl.readline()
 			line = fl.readline()
+			lii = 0
 			while line:
 				parts = line.split(',')
 				timestamp_round = parts[0]
@@ -65,19 +67,25 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 				if tround < t0 or tround > tf:
 					line = fl.readline()
 					continue
+				# print(parts)
+				if not parts[1]:
+					line = fl.readline()
+					continue # sometimes blank str??
 				segment.append({
 					'timestamp': tround,
 					'location': locname,
 					'pm25': float(parts[1])
 				})
 				line = fl.readline()
+				# sys.stdout.write('%d: %s     \r' % (lii, fpath))
+				# sys.stdout.flush()
+				# lii+=1
 		raw_segments.append(segment)
 
 		sys.stdout.write('[%d/%d] Loading segment...    \r' % (sii+1, len(segdef['locations'])))
 		sys.stdout.flush()
 	print()
 
-	interval = 5 * 60
 	tsteps = int((date_in_seconds(tf) - date_in_seconds(t0)) // (interval))
 	print('Time Steps:', tsteps)
 	for sii, seg in enumerate(raw_segments):
@@ -91,8 +99,9 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid):
 			# print(seconds)
 			timeind = int(seconds // interval)
 			assert timeind >= 0 and timeind < tsteps + 1
+			assert entry['pm25'] >= 0
 			datamat[sii, timeind] = entry['pm25']
-
+		# print(-np.sum(datamat[sii][datamat[sii] < 0]), tsteps)
 	nmissing = -np.sum(datamat[datamat < 0])
 	print('Total missing: %.1f%%' % (
 		nmissing / ((tsteps + 1) * len(raw_segments)) * 100.0))
