@@ -1,3 +1,34 @@
+#//////////////////////////////////////////////////////
+#### 2018-11-03 Kaiterra csv 11May-10June, here!!! ####
+#//////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+kt.loc <- read.table('Kaiterra_11May-10June_loc.csv',sep=',',header=T)
+kt.sens <- read.table('Kaiterra_11May-10June_pm25.csv',sep=',',header=T)
+
+str(kt.loc)
+
+kt.sens$ts <- as.POSIXct(strptime(kt.sens$ts,
+                                  format='%Y-%m-%d %H:%M',
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+# kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(kt.sens)
+
+
+
+
+
+
+
+
+
+
+
+
 #///////////////////////////////////////////////////////////////////////////////
 #### 2018-11-03 Kaiterra updated data Apr-Sep 2018 csv from Shiva, save txt ####
 #///////////////////////////////////////////////////////////////////////////////
@@ -167,6 +198,8 @@ write.table(kt.loc,file='Kaiterra_11May-10June_loc.csv',sep=',',
 # save(list=c('kt.loc','kt.sens','tw.bd','names.sens',
 #             'corners.delhi','map.delhi'),
 #      file='kt_GoodTW_Padded.RData')
+
+
 
 
 
