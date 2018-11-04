@@ -1,3 +1,176 @@
+#///////////////////////////////////////////////////////////////////////////////
+#### 2018-11-03 Kaiterra updated data Apr-Sep 2018 csv from Shiva, save txt ####
+#///////////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+pafdata <- '/Delhi Pollution/08_Data_Analysis/Output/csvFiles'
+
+
+### import data from Shiva's csv, reformat timestamp, check nb sensors/locations
+kt.full <- read.table(paste0(paf2drop,pafdata,'/kaiterra_panel_15min_2018_Sep_28.csv'),
+                      sep=',',header=T)
+str(kt.full)
+
+kt.full$ts <- as.POSIXct(strptime(kt.full$timestamp_round,
+                                  format='%Y-%m-%d %H:%M:%S',
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+# kt.full$ts <- format(kt.full$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat no seconds
+# ^ convert to correct class with IST time zone
+range(kt.full$ts) # overview of full time period
+
+
+table(kt.full$field_egg_id) # all same length because padded with NAs
+length(unique(kt.full$field_egg_id))
+names.loc <- as.character(unique(kt.full$field_egg_id))
+nb.loc <- length(names.loc) # 22 locations
+# ^ field_egg_id as unique identifier for location-sensor pairs, but Shiva
+#   already merged disjoint sensor windows, so field_egg_id uniquely identifies
+#   the 22 locations now.
+
+
+### visualize available data points per sensor, highlight candidate tw
+range(kt.full$ts)
+tw.bd <- as.POSIXct(c('2018-05-11 00:00:00',
+                      '2018-06-10 00:00:00'),tz="Asia/Kolkata")
+# ^ tw suggested by Shiva
+
+diff(tw.bd) # exactly 30 days
+as.numeric(diff(tw.bd))*24*4
+# ^ 30 days = 2880 intervals = 2881 values not accounting for NAs
+
+
+pdf('Kaiterra_15min_FieldEggIdUptime.pdf',width=14,height=7)
+# by location (= unique field_egg_id)
+plot(x=tw.vizbd,y=c(1,nb.loc),type='n',
+     xlab='Total time period',ylab='Location (field egg id)',yaxt='n',
+     main='Kaiterra Apr-Jul 2018, up and down time by location')
+axis(side=2,at=1:nb.loc,labels=names.loc,las=1)
+for (j in 1:nb.loc){
+  ind <- kt.full$field_egg_id==names.loc[j]
+  ind.na <- is.na(kt.full$pm25[ind])
+  arrows(x0=min(kt.full$ts[ind]),x1=max(kt.full$ts[ind]),y0=j,y1=j,
+         col='grey',angle=90,code=3,length=0.05,lty=1)
+  points(x=kt.full$ts[ind][!ind.na],y=rep(j,sum(!ind.na)),pch=19,cex=0.1)
+}
+abline(v=tw.bd,lty=2)
+dev.off()
+
+# ^ Visual inspection 11 May - 10 Jun up/down time per location:
+#   drop 4 locations: DF07, E8E4, 8E2A, 113E
+#   => 18 locations left
+
+
+### create df lat/lon and map
+discarded.loc <- c('DF07', 'E8E4', '8E2A', '113E')
+kept.loc <- names.loc[!names.loc%in%discarded.loc] # 18 left
+
+kt.loc <- data.frame('loc'=names.loc,stringsAsFactors=F)
+table(round(kt.full$longitude,4)) # looks ok
+table(round(kt.full$latitude,4)) # looks ok
+
+for (j in 1:nb.loc){
+  kt.loc$lon[j] <- kt.full$longitude[kt.full$field_egg_id==names.loc[j]][1]
+  kt.loc$lat[j] <- kt.full$latitude[kt.full$field_egg_id==names.loc[j]][1]
+}
+
+
+### plot all locations on map of Delhi
+library(sp)
+library(rgdal)
+library(OpenStreetMap)
+
+range(kt.full$latitude)
+range(kt.full$longitude)
+corners.delhi <- list('topleft'=c(28.41, 77.04), # lat/lon
+                      'botright'=c(28.64, 77.38)) # lat/lon
+map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
+                     zoom=NULL,type='stamen-toner') # type='osm'
+
+df.latlon <- SpatialPoints(kt.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.latlon.sp <- spTransform(df.latlon,osm())
+
+
+pdf('Kaiterra_15min_Map_DiscardedSensors.pdf',width=9,height=7)
+plot(map.delhi,removeMargin=F)
+points(df.latlon.sp,pch=19,col=ifelse(names.loc%in%discarded.loc,'red','blue'))
+text(names.loc,x=df.latlon.sp@coords[1:j,1],y=df.latlon.sp@coords[1:j,2],
+     col=ifelse(names.loc%in%discarded.loc,'red','blue'),cex=0.5,
+     pos=c(4,2,3,2,4,4,2,4,4,1,1,2,1,4,4,4,1,4,4,2,2,4))
+axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+title(main="Kaiterra sensors Mar-Sep 2018, tw 2018-05-11 - 2018-06-10",
+      xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+legend('bottomright',c('Discarded','Kept'),pch=c(19,19),bg='white',
+       col=c('red','blue'))
+dev.off()
+
+
+### 18 locations left: extract tw from kt.full, save data to txt (no RData)
+kt <- subset(kt.full,subset=(kt.full$ts >= tw.bd[1] &
+                               kt.full$ts <= tw.bd[2] &
+                               kt.full$field_egg_id%in%kept.loc))
+kt <- kt[,c('field_egg_id','ts','pm25')]
+str(kt) # 2881*18 = 51858 obs
+
+range(kt$ts)
+tw.bd # identical by construction
+
+tw <- seq(from=tw.bd[1],to=tw.bd[2],by='15 min') # common time stamp
+tw <- format(tw,"%Y-%m-%d %H:%M",usetz=T) # reformat without seconds
+length(tw) # 2881 values incl bounds
+str(tw) # correct format, no seconds
+
+kt.sens <- data.frame('ts'=tw)
+for (j in 1:length(kept.loc)){
+  ind <- kt$field_egg_id==kept.loc[j]
+  kt.sens[[paste0('pm25_',kept.loc[j])]] <- kt$pm25[ind]
+}
+str(kt.sens)
+head(kt.sens)
+tail(kt.sens) # looks good
+
+write.table(kt.sens,file='Kaiterra_11May-10June_pm25.csv',sep=',',
+            row.names=F,col.names=T)
+# ^ csv file of 2881 obs pm25, 19 cols:
+#   - col 1: character string for time stamp
+#   - col 2-19: numerical for pm25, one for each field_egg_id
+
+
+
+### create df of 18 locations with lat/lon and UTM coord
+df.latlon <- SpatialPoints(kt.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+proj.string <- "+proj=utm +zone=43 +ellps=WGS84 +north +units=km"
+# ^ Delhi = UTM zone 43R
+coord.utm <- spTransform(df.latlon, CRS(proj.string)) # re-project
+kt.loc$utmx <- coord.utm@coords[,1]
+kt.loc$utmy <- coord.utm@coords[,2]
+
+str(kt.loc)
+
+kt.loc <- kt.loc[names.loc%in%kept.loc,] # keep only kept loc
+
+write.table(kt.loc,file='Kaiterra_11May-10June_loc.csv',sep=',',
+            row.names=F,col.names=T)
+# ^ csv file for 18 rows = 18 locations:
+#  - col 1 = character string for field_egg_id (= unique location identifier)
+#  - col 2 = numerical for longitude
+#  - col 3 = numerical for latitude
+#  - col 4 = numerical for projected UTM X
+#  - col 5 = numerical for projected UTM Y
+
+
+# ### save useful objects in envir
+# save(list=c('kt.loc','kt.sens','tw.bd','names.sens',
+#             'corners.delhi','map.delhi'),
+#      file='kt_GoodTW_Padded.RData')
+
+
+
+
 #////////////////////////////////////////////////////////////////////
 #### 2018-10-23 Kaiterra updated data Apr-Sep 2018, find good tw ####
 #////////////////////////////////////////////////////////////////////
@@ -17,9 +190,9 @@ kt.full <- data.frame(na.omit(read_dta(
   encoding='latin1')))
 kt.full$ts <- as.POSIXct(strptime(kt.full$timestamp_round,
                                   format='%Y-%m-%d %H:%M:%S',
-                                  tz="Asia/Kolkata"))
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+kt.full$ts <- format(kt.full$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat no seconds
 # ^ convert to correct class with IST time zone
-# kt.full$ts <- format(kt.full$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat
 
 range(kt.full$ts) # overview of full time period
 
@@ -86,7 +259,6 @@ legend('topleft',c('downtime','uptime','down -> up'),
 # ^ candidate tw: mid-May and mid-July
 par(mfrow=c(1,1))
 dev.off()
-
 
 
 ### tw suggested by Shiva in email 2018-10-23
@@ -169,7 +341,6 @@ legend('bottomright',c('Discarded','Kept'),pch=c(19,19),bg='white',
 dev.off()
 
 
-### here!!! extract tw from kt.full, pad with NAs, save data to txt, save minimal envir
 
 
 
