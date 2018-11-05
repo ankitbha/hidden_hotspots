@@ -57,6 +57,7 @@ if __name__ == '__main__':
 	state_date, end_date = eval_segment['start'], eval_segment['end']
 	location_names = locnames
 	time_interval = 15
+	tag ='disc'
 
 	# if args.load is not None:
 	#     print(' Loading:', args.load)
@@ -147,6 +148,7 @@ if __name__ == '__main__':
 
 		if eii % 10 == 0:
 			mse_avg = plot_preview(
+				tag,
 				eii,
 				(state_date, end_date, location_names),
 				args.target,
@@ -157,7 +159,7 @@ if __name__ == '__main__':
 				criterion,
 				interval=time_interval)
 
-			with open('outputs/seg_%d_targ_%d.txt' % (args.eval_segment, args.target), 'w') as fl:
+			with open('outputs/%s_%d_targ_%d.txt' % (tag, args.eval_segment, args.target), 'w') as fl:
 				fl.write('MAPE:%.3f\n' % series_mape)
 				fl.write('MSE_TEST:%.3f\n' % (series_loss * 100.0**2))
 				fl.write('MSE_AVG:%.3f\n' % (mse_avg * 100.0**2))

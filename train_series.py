@@ -23,10 +23,10 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
-def plot_preview(epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5):
+def plot_preview(tag, epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5):
     (start, end, locations) = seginfo
-    imgname = 'preview/pred_%d_epoch_%d.png' % (target, epoch)
-    currname = 'pred_%d_best.png' % (target)
+    # imgname = 'preview/%s_pred_%d_epoch_%d.png' % (tag, target, epoch)
+    currname = 'images/plots/%s_pred_%d_best.png' % (tag, target)
 
     tf = time.mktime(datetime.strptime(end, '%m/%d/%Y').timetuple())
     t0 = tf - interval * 60 * len(predictions)
@@ -72,7 +72,7 @@ def plot_preview(epoch, seginfo, target, segments, predictions, loss, histlen, c
     plts = [pl[0] for pl in plts] # ?? actual ref is first elem?
     plt.legend(plts, lbls, prop={'size': 6})
     plt.xticks([0, len(predictions)-1], [startstr, dstr])
-    plt.savefig(imgname, bbox_inches='tight')
+    # plt.savefig(imgname, bbox_inches='tight')
     plt.savefig(currname, bbox_inches='tight')
     plt.close()
 
@@ -108,13 +108,13 @@ if __name__ == '__main__':
     # device = torch.device("cpu")
     log = SummaryWriter()
 
-    # TODO: ability to train on all segments
     if args.segment == -1:
         (train_data, test_data), metadata = create_dataset_gov()
         numsegments = train_data.shape[0]
         state_date, end_date = '08/01/2018','10/01/2018'
         location_names = metadata[2]
         time_interval = 15        # 15 minutes
+        tag = 'gov'
     elif args.segment == -2: # gov + our data
         USESEG = 0
         bad_govs = EXCLUDE[USESEG]
@@ -125,11 +125,13 @@ if __name__ == '__main__':
         numsegments = train_data.shape[0]
         state_date, end_date = seg['start'], seg['end']
         time_interval = 5        # gov data upsamped to 5 mins
+        tag = 'joint'
     else:
         # FIXME: update set metadata variables
         use_segment = SEGMENTS[args.segment]
         numsegments = len(use_segment['locations'])
         (train_data, test_data), metadata = create_dataset(use_segment)
+        tag = 'ours'
 
     if args.load is not None:
         print(' Loading:', args.load)
@@ -230,6 +232,7 @@ if __name__ == '__main__':
 
         if eii % 10 == 0:
             mse_avg = plot_preview(
+                tag,
                 eii,
                 (state_date, end_date, location_names),
                 args.target,
@@ -240,7 +243,7 @@ if __name__ == '__main__':
                 criterion,
                 interval=time_interval)
 
-            with open('outputs/seg_%d_targ_%d.txt' % (args.segment, args.target), 'w') as fl:
+            with open('outputs/%s_seg_%d_targ_%d.txt' % (tag, args.segment, args.target), 'w') as fl:
                 fl.write('MAPE:%.3f\n' % series_mape)
                 fl.write('MSE_TEST:%.3f\n' % (series_loss * 100.0**2))
                 fl.write('MSE_AVG:%.3f\n' % (mse_avg * 100.0**2))
