@@ -245,7 +245,7 @@ def nextval_batch(datamat, target, inds, history=5):
 	labels = np.array(labels)
 	return series, labels
 
-def series_batch(datamat, target, inds, history=5):
+def series_batch(datamat, target, inds, history=5, post=None):
 	'''
 	Returns data in batches where time segment of `target` is missing.
 
@@ -258,7 +258,9 @@ def series_batch(datamat, target, inds, history=5):
 		data = []
 		for segii, segment in enumerate(datamat):
 			if segii == target: continue
-			data.append(datamat[segii, ind:ind+history])
+			seg = datamat[segii, ind:ind+history]
+			if post is not None: seg = post(seg)
+			data.append(seg)
 		data = np.array(data)
 		# predictions made for entire missing target segment
 		lbl = datamat[target, ind:ind+history]
@@ -271,11 +273,12 @@ def series_batch(datamat, target, inds, history=5):
 	return series, labels
 
 def discrete_dataset_gov(
-	test_segdef,         # takes in segdef format: segment will be reserved for testing
+	eval_segment,         # takes in segdef format: segment will be reserved for testing
 	split=0.8,
 	fillmethod=pad_valid,
 	history=16,           # will return segments of this length
 	minavail=0.8,         # will ignore segments with too few valid
+	minsensitive=0.8,     # TODO: will ignore segments w/ values stuck for too long
 	exclude=[]):
 	# scans the entire dataset (sans "exclude") for valid trainable segments
 
@@ -284,8 +287,8 @@ def discrete_dataset_gov(
 	with open('data/gov.json') as fl:
 		govdata = json.load(fl)
 
-	t0 = datetime.strptime(test_segdef['start'], '%m/%d/%Y')
-	tf = datetime.strptime(test_segdef['end'], '%m/%d/%Y')
+	t0 = datetime.strptime(eval_segment['start'], '%m/%d/%Y')
+	tf = datetime.strptime(eval_segment['end'], '%m/%d/%Y')
 
 	__govnames = [ent['location'] for ent in govdata[0]['values']]
 	print(' [*] Found %d gov locations' % len(__govnames))
@@ -336,10 +339,17 @@ def discrete_dataset_gov(
 			if tii - first_after < history: continue  # seek forward until history available
 			segment = datamat[:, tii-history:tii]
 		if segment is None: continue
+
+
+		n_missing = [-np.sum(row[row < 0]) for row in segment]
+		perc_missing = [nm / segment.shape[1] for nm in n_missing]
+		missing_many = [perc > (1-minavail) for perc in perc_missing]
+		if any(missing_many):
+			continue
+		# TODO: detect "stuck" sensors
+
 		train_inds.append(tii-history)
 
-		# FIXME: reject segments with very bad data consistency/integrity
-		# FIXME: pad complete okay segments
 
 	print(' [*] Discovered %d/%d usable discrete segments' % (len(train_inds), datamat.shape[1]))
 
@@ -348,13 +358,18 @@ def discrete_dataset_gov(
 			(datamat.shape[1] - __missingstat[gii]) / datamat.shape[1] * 100.0,
 			__govnames[govindex]))
 
+	# pad fill datamat
+	for sii, segment in enumerate(datamat):
+		fillmethod(segment)
+		assert len(np.where(segment < 0)[0]) == 0
+
 	datamat /= 100.0 # normalize under 100
 	reserved /= 100.0
 
 	# TODO: option to limit to subsection of reserved for comparable testing w/ other
 
 	# series_batch can be used to get batches from this info
-	return ((datamat, train_inds), reserved)
+	return ((datamat, train_inds), reserved), [__govnames[govindex] for govindex in selected]
 
 
 if __name__ == '__main__':

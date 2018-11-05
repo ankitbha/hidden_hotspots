@@ -25,8 +25,8 @@ from tensorboardX import SummaryWriter
 
 def plot_preview(epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5):
     (start, end, locations) = seginfo
-    imgname = 'preview/pred_%d_epoch_%d.png' % (args.target, epoch)
-    currname = 'pred_%d_best.png' % (args.target)
+    imgname = 'preview/pred_%d_epoch_%d.png' % (target, epoch)
+    currname = 'pred_%d_best.png' % (target)
 
     tf = time.mktime(datetime.strptime(end, '%m/%d/%Y').timetuple())
     t0 = tf - interval * 60 * len(predictions)
