@@ -40,6 +40,10 @@ def pad_valid(series):
 			#   fill with next valid value
 			series[lastvalid+1:ind] = val
 		if val != -1: lastvalid = ind
+	if lastvalid != len(series) - 1:
+		# did not end with valid vals
+		series[lastvalid:] = series[lastvalid]
+
 
 def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 	'''
@@ -126,7 +130,7 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 def create_dataset_gov(
 	start='08/01/2018', end='10/01/2018',
 	split=0.8, fillmethod=pad_valid,
-	exclude=['Sirifort, New Delhi - CPCB', 'Punjabi Bagh, Delhi - DPCC']):
+	exclude=[]):
 	import json
 
 	t0 = datetime.strptime(start, '%m/%d/%Y')
@@ -163,7 +167,7 @@ def create_dataset_gov(
 
 			if byloc['location'] in exclude: continue
 
-			if byloc['pm25'] is None:
+			if byloc['pm25'] is None or byloc['pm25'] < 0:
 				datamat[gii, tii] = -1
 				__missingstat[gii] += 1
 			else:
@@ -178,6 +182,13 @@ def create_dataset_gov(
 
 	for sii, segment in enumerate(datamat):
 		fillmethod(segment)
+		# print(np.where(segment < 0))
+		try:
+			assert len(np.where(segment < 0)[0]) == 0
+		except:
+			print(np.where(segment < 0)[0])
+			print(segment[1238:])
+			assert False
 	datamat /= 100.0 # normalize under 100
 
 	splitind = int(datamat.shape[1] * split)
@@ -192,19 +203,21 @@ def create_dataset_gov(
 
 	return (train_data, test_data), (None, None, [__govnames[gi] for gi in selected])
 
-def create_dataset_joint(segdef, split=0.8, fillmethod=pad_valid, exclude=[]):
+def create_dataset_joint(segdef, split=0.8, fillmethod=pad_valid, exclude=[], upsamp=None):
 	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
 	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
 
 	(ourdata, _), (_, _) = create_dataset(segdef, split=1.0, fillmethod=fillmethod)
 	(govdata, _), (_, _, govnames) = create_dataset_gov(start=segdef['start'], end=segdef['end'], split=1.0, fillmethod=fillmethod, exclude=exclude)
 
-	# govdata is in 15 min intervals; to preserve the resolution of our data, we upsamp the govdata to match
-	upsamp = np.repeat(govdata, 3, axis=1)[:, :-2] # last two OOB
-	assert ourdata.shape[1] == upsamp.shape[1]
+	if upsamp is not None:
+		# govdata is in 15 min intervals; to preserve the resolution of our data, we upsamp the govdata to match
+		uped = np.repeat(govdata, upsamp, axis=1)[:, :-2] # last two OOB
+		assert ourdata.shape[1] == uped.shape[1]
+		govdata = uped
 
-	# print(ourdata.shape, upsamp.shape)
-	datamat = np.concatenate([ourdata, upsamp], axis=0)
+	# print(ourdata.shape, uped.shape)
+	datamat = np.concatenate([ourdata, govdata], axis=0)
 
 	splitind = int(datamat.shape[1] * split)
 	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
