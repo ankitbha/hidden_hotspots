@@ -1,6 +1,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*.avi
+*.mp4
 *$py.class
 *.png
 runs
