@@ -270,6 +270,93 @@ def series_batch(datamat, target, inds, history=5):
 	labels = np.array(labels)
 	return series, labels
 
+def discrete_dataset_gov(
+	test_segdef,         # takes in segdef format: segment will be reserved for testing
+	split=0.8,
+	fillmethod=pad_valid,
+	history=16,           # will return segments of this length
+	minavail=0.8,         # will ignore segments with too few valid
+	exclude=[]):
+	# scans the entire dataset (sans "exclude") for valid trainable segments
+
+	import json
+	print(' [*] Loading discrete govdata')
+	with open('data/gov.json') as fl:
+		govdata = json.load(fl)
+
+	t0 = datetime.strptime(test_segdef['start'], '%m/%d/%Y')
+	tf = datetime.strptime(test_segdef['end'], '%m/%d/%Y')
+
+	__govnames = [ent['location'] for ent in govdata[0]['values']]
+	print(' [*] Found %d gov locations' % len(__govnames))
+	for gname in __govnames:
+		print('    * %s %s' % ('' if gname not in exclude else '(excluded)', gname))
+	# selected contains index (used to access govdata matrix) of selected gov sensors
+	selected = [ind for ind, name in enumerate(__govnames) if name not in exclude]
+	__numgovs = len(selected)
+	assert len(selected) == len(__govnames) - len(exclude)
+	print(' [*] Tracking %d gov locations' % __numgovs)
+
+	reserved = []
+	datamat = np.zeros((len(selected), len(govdata)))
+
+	__missingstat = [0] * __numgovs
+	for tii, timeentry in enumerate(govdata):
+		for gii, govindex in enumerate(selected):
+			locdata = timeentry['values'][govindex]
+			if locdata['location'] in exclude: continue
+
+			if locdata['pm25'] is None or locdata['pm25'] < 0:
+				datamat[gii, tii] = -1
+				__missingstat[gii] += 1
+			else:
+				val = locdata['pm25']
+				if val == 0: val = 1
+				datamat[gii, tii] = val
+
+		te = datetime.strptime(timeentry['date'], '%d-%m-%Y %H:%M')
+		if te >= t0 and te < tf:
+			reserved.append(datamat[:, tii])
+
+	reserved = np.transpose(np.array(reserved))
+	for sii, segment in enumerate(reserved):
+		fillmethod(segment)
+		assert len(np.where(segment < 0)[0]) == 0
+
+	train_inds = []
+	first_after = None
+	for tii, timeentry in enumerate(govdata):
+		te = datetime.strptime(timeentry['date'], '%d-%m-%Y %H:%M')
+		segment = None
+		if te < t0:                 # before reserved
+			if tii < history: continue  # seek forward until history available
+			segment = datamat[:, tii-history:tii]
+		elif te > tf:               # after reserved
+			if first_after is None: first_after = tii
+			if tii - first_after < history: continue  # seek forward until history available
+			segment = datamat[:, tii-history:tii]
+		if segment is None: continue
+		train_inds.append(tii-history)
+
+		# FIXME: reject segments with very bad data consistency/integrity
+		# FIXME: pad complete okay segments
+
+	print(' [*] Discovered %d/%d usable discrete segments' % (len(train_inds), datamat.shape[1]))
+
+	for gii, govindex in enumerate(selected):
+		print('    * Available: %.1f%%  Location: %s' % (
+			(datamat.shape[1] - __missingstat[gii]) / datamat.shape[1] * 100.0,
+			__govnames[govindex]))
+
+	datamat /= 100.0 # normalize under 100
+	reserved /= 100.0
+
+	# TODO: option to limit to subsection of reserved for comparable testing w/ other
+
+	# series_batch can be used to get batches from this info
+	return ((datamat, train_inds), reserved)
+
+
 if __name__ == '__main__':
 	BATCHSIZE = 32
 	# (train, test), metadata = create_dataset(SEGMENTS[0])
@@ -286,4 +373,8 @@ if __name__ == '__main__':
 
 	# (train, test), metadata = create_dataset_gov()
 
-	create_dataset_joint(SEGMENTS[0])
+	((datamat, train_inds), reserved) = discrete_dataset_gov(
+		test_segdef=SEGMENTS[0],
+		exclude=EXCLUDE[0])
+
+
