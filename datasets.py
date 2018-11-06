@@ -18,7 +18,7 @@ import pandas as pd
 import torch
 from configs import *
 from glob import glob
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 def find_by_id(idname):
@@ -44,19 +44,10 @@ def pad_valid(series):
 		# did not end with valid vals
 		series[lastvalid:] = series[lastvalid]
 
-
-def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
-	'''
-	TODO: Specify neighbors in neighborlist
-		otherwise all are used
-
-	histlen : length of history presented in batch
-	sensor_id : name of specified target location
-	'''
-
-	raw_segments = [] # collection of segments
-	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
-	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
+def load_ourdata(segdef, trange=None):
+	raw_segments = []
+	t0, tf = None, None
+	if trange is not None: t0, tf = trange
 	for sii, (locname, locid) in enumerate(segdef['locations']):
 		segment = []
 		fpath = find_by_id(locid)
@@ -68,7 +59,7 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 				parts = line.split(',')
 				timestamp_round = parts[0]
 				tround = datetime.strptime(timestamp_round, '%Y-%m-%d %H:%M:%S')
-				if tround < t0 or tround > tf:
+				if trange is not None and ( tround < t0 or tround > tf):
 					line = fl.readline()
 					continue
 				# print(parts)
@@ -88,6 +79,22 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 
 		sys.stdout.write('[%d/%d] Loading segment...    \r' % (sii+1, len(segdef['locations'])))
 		sys.stdout.flush()
+
+	return raw_segments
+
+def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
+	'''
+	TODO: Specify neighbors in neighborlist
+		otherwise all are used
+
+	histlen : length of history presented in batch
+	sensor_id : name of specified target location
+	'''
+	raw_segments = [] # collection of segments
+	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
+	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
+
+	raw_segments = load_ourdata(segdef, (t0, tf))
 	print()
 
 	tsteps = int((date_in_seconds(tf) - date_in_seconds(t0)) // (interval))
@@ -99,13 +106,15 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 	datamat = -np.ones((len(raw_segments), tsteps + 1))
 	for sii, segment in enumerate(raw_segments):
 		for entry in segment:
+			dmin = entry['timestamp'] if dmin is None or entry['timestamp'] < dmin else dmin
+			dmax = entry['timestamp'] if dmax is None or entry['timestamp'] > dmax else dmax
+
 			seconds = date_in_seconds(entry['timestamp']) - date_in_seconds(t0)
 			# print(seconds)
 			timeind = int(seconds // interval)
 			assert timeind >= 0 and timeind < tsteps + 1
 			assert entry['pm25'] >= 0
 			datamat[sii, timeind] = entry['pm25']
-		# print(-np.sum(datamat[sii][datamat[sii] < 0]), tsteps)
 	nmissing = -np.sum(datamat[datamat < 0])
 	print('Total missing: %.1f%%' % (
 		nmissing / ((tsteps + 1) * len(raw_segments)) * 100.0))
@@ -371,6 +380,105 @@ def discrete_dataset_gov(
 	# series_batch can be used to get batches from this info
 	return ((datamat, train_inds), reserved), [__govnames[govindex] for govindex in selected]
 
+def discrete_dataset_ours(
+	eval_segment,         # takes in segdef format: segment will be reserved for testing
+	split=0.8,
+	fillmethod=pad_valid,
+	history=16,           # will return segments of this length
+	minavail=0.8,         # will ignore segments with too few valid
+	minsensitive=0.8,     # TODO: will ignore segments w/ values stuck for too long
+	exclude=[]):
+	# scans the entire dataset (sans "exclude") for valid trainable segments
+
+	raw_segments = load_ourdata(eval_segment, trange=None)
+	print()
+
+	reserved = []
+	t0 = datetime.strptime('03-01-2018', '%m-%d-%Y')
+	tf = datetime.strptime('11-01-2018', '%m-%d-%Y')
+	tsteps = int((tf - t0).total_seconds() / (15 * 60))
+	datamat = -np.ones((len(raw_segments), tsteps+1))
+	__missingstat = [0] * len(eval_segment['locations'])
+	interval = 15 * 60
+	for sii, segment in enumerate(raw_segments):
+		for entry in segment:
+			seconds = date_in_seconds(entry['timestamp']) - date_in_seconds(t0)
+			timeind = int(seconds // interval)
+			assert timeind >= 0 and timeind < tsteps + 1
+			assert entry['pm25'] >= 0
+			datamat[sii, timeind] = entry['pm25']
+
+	assert np.min(datamat) >= -1
+	nmissing = -np.sum(datamat[datamat < 0])
+	print(' [*] Total missing: %.1f%%' % (
+		nmissing / ((tsteps + 1) * len(raw_segments)) * 100.0))
+	for sii, series in enumerate(datamat):
+		print('   * Available: %.1f%%   Location: %s' % (
+			(len(series) + np.sum(series[series < 0])) / len(series) * 100,
+			eval_segment['locations'][sii][0]))
+
+
+	r0 = datetime.strptime(eval_segment['start'], '%m/%d/%Y')
+	rf = datetime.strptime(eval_segment['end'], '%m/%d/%Y')
+	start = (date_in_seconds(r0) - date_in_seconds(t0)) // (15 * 60)
+	end = (date_in_seconds(rf) - date_in_seconds(t0)) // (15 * 60)
+	reserved = datamat[:, int(start):int(end)].copy()
+
+	print(' [*] Eval missing: %.1f%%' % (
+		-np.sum(reserved[reserved < 0]) / (reserved.shape[1] * reserved.shape[0]) * 100))
+
+	print(' [*] Eval segment availability:')
+	for sii, series in enumerate(reserved):
+		print('   * Available: %.1f%%   Location: %s' % (
+			(len(series) + np.sum(series[series < 0])) / len(series) * 100,
+			eval_segment['locations'][sii][0]))
+
+	for sii, series in enumerate(reserved):
+		fillmethod(series)
+		assert len(np.where(series < 0)[0]) == 0
+
+	train_inds = []
+	first_after = None
+	nbfr, naft = 0, 0
+	for tii in range(datamat.shape[1]):
+		segment = None
+		if tii < start:                 # before reserved
+			if tii < history: continue  # seek forward until history available
+			segment = datamat[:, tii-history:tii]
+			nbfr += 1
+		elif tii >= end:               # after reserved
+			if first_after is None: first_after = tii
+			if tii - first_after < history: continue  # seek forward until history available
+			segment = datamat[:, tii-history:tii]
+			naft += 1
+			# print(naft)
+		if segment is None: continue
+
+
+		n_missing = [-np.sum(row[row < 0]) for row in segment]
+		perc_missing = [nm / segment.shape[1] for nm in n_missing]
+		missing_many = [perc > (1-minavail) for perc in perc_missing]
+		if any(missing_many):
+			continue
+		# TODO: detect "stuck" sensors
+
+		train_inds.append(tii-history)
+
+	print(' [*] Discovered %d/%d usable discrete segments' % (len(train_inds), datamat.shape[1]))
+
+	# pad fill datamat
+	for sii, segment in enumerate(reserved):
+		fillmethod(segment)
+		assert len(np.where(segment < 0)[0]) == 0
+	reserved /= 100.0
+
+	datamat /= 100.0 # normalize under 100
+
+	# TODO: option to limit to subsection of reserved for comparable testing w/ other
+
+	# series_batch can be used to get batches from this info
+	return ((datamat, train_inds), reserved), [nm[0] for nm in eval_segment['locations']]
+
 
 if __name__ == '__main__':
 	BATCHSIZE = 32
@@ -388,8 +496,11 @@ if __name__ == '__main__':
 
 	# (train, test), metadata = create_dataset_gov()
 
-	((datamat, train_inds), reserved) = discrete_dataset_gov(
-		test_segdef=SEGMENTS[0],
+	# create_dataset(
+	# 	SEGMENTS[0])
+
+	discrete_dataset_ours(
+		eval_segment=SEGMENTS[0],
 		exclude=EXCLUDE[0])
 
 
