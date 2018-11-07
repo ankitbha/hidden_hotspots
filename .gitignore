@@ -8,6 +8,7 @@ __pycache__/
 runs
 *.DS_Store
 *.pth
+*.csv
 # C extensions
 *.so
 <<<<<<< HEAD

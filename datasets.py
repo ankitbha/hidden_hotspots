@@ -20,6 +20,7 @@ from configs import *
 from glob import glob
 from datetime import datetime, timedelta
 import time
+import json
 
 def find_by_id(idname):
 	locfiles = glob('./data/kaiterra_field*.csv')
@@ -106,9 +107,6 @@ def create_dataset(segdef, split=0.8, fillmethod=pad_valid, interval = 15 * 60):
 	datamat = -np.ones((len(raw_segments), tsteps + 1))
 	for sii, segment in enumerate(raw_segments):
 		for entry in segment:
-			dmin = entry['timestamp'] if dmin is None or entry['timestamp'] < dmin else dmin
-			dmax = entry['timestamp'] if dmax is None or entry['timestamp'] > dmax else dmax
-
 			seconds = date_in_seconds(entry['timestamp']) - date_in_seconds(t0)
 			# print(seconds)
 			timeind = int(seconds // interval)
@@ -234,6 +232,36 @@ def create_dataset_joint(segdef, split=0.8, fillmethod=pad_valid, exclude=[], up
 
 	ournames = [ent[0] for ent in segdef['locations']]
 	return (train_data, test_data), (None, None, ournames + govnames)
+
+
+def create_dataset_weather(segdef, split=0.8, fillmethod=pad_valid, exclude=[], upsamp=None):
+	(datamat, _), (_, _, names) = create_dataset_joint(
+		segdef, 1.0, fillmethod, exclude, upsamp)
+
+	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
+	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
+
+	with open('./data/open_weather_newdelhi.json') as fl:
+		paid_data = json.load(fl)
+	from datetime import date
+
+	d0 = datetime(2018, 3, 1)
+	w0 = int((t0 - d0).total_seconds() // (60 * 60)) + 5
+	wf = int((tf - d0).total_seconds() // (60 * 60)) + 5
+	# print(w0, wf, len(paid_data))
+	wdata = [ent['main']['temp'] for ent in paid_data[w0:wf]]
+	wdata = np.array(wdata)
+	wdata -= 273.15  # kelvins to celsius
+	wdata /= 50 # normalize celsius
+	wdata = np.repeat(wdata, 4, axis=0)
+	# print(datamat.shape, wdata.shape)
+	datamat = np.concatenate([datamat[:, :-1], np.array([wdata])], axis=0)
+
+	splitind = int(datamat.shape[1] * split)
+	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
+	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
+	assert len(names) == len(train_data) - 1
+	return (train_data, test_data), names
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''
@@ -498,9 +526,6 @@ if __name__ == '__main__':
 
 	# create_dataset(
 	# 	SEGMENTS[0])
-
-	discrete_dataset_ours(
-		eval_segment=SEGMENTS[0],
-		exclude=EXCLUDE[0])
+	create_dataset_weather(SEGMENTS[0], exclude=EXCLUDE[0])
 
 
