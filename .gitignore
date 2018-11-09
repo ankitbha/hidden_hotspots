@@ -1,13 +1,20 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*.avi
+*.mp4
 *$py.class
 *.png
 runs
 *.DS_Store
 *.pth
+*.csv
 # C extensions
 *.so
+<<<<<<< HEAD
+debug
+=======
+>>>>>>> master
 outputs
 # Distribution / packaging
 .Python
