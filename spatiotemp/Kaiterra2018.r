@@ -9,6 +9,7 @@ setwd(paf)
 
 kt.loc <- read.table('Kaiterra_11May-10June_loc.csv',sep=',',header=T)
 kt.sens <- read.table('Kaiterra_11May-10June_pm25.csv',sep=',',header=T)
+kt.weat <- read.table('Kaiterra_11May-10June_weather.csv',sep=',',header=T)
 
 str(kt.loc)
 
@@ -18,14 +19,23 @@ kt.sens$ts <- as.POSIXct(strptime(kt.sens$ts,
 # kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
 str(kt.sens)
 
+kt.weat$ts <- as.POSIXct(strptime(kt.weat$ts,
+                                  format='%Y-%m-%d %H:%M',
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+# kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(kt.weat)
+# ^ hourly data only, no spatial info, for whole Delhi
+
+
+
 ### create quadratic B-spline basis, assuming day is [0,1]
 library(splines)
 
 sb.dailygrid <- seq(0,1,length.out=96)
 # ^ 24*4=96 obs per day
 
-kt.sens$ts[1:26]
-sb.dailygrid[1:26]
+# kt.sens$ts[1:26]
+# sb.dailygrid[1:26]
 # ^ 2nd knot = 0.25 => first 24 obs in first sub-interval, ok
 
 kn <- c(0,0.25,0.5,0.75,1) # fixed knots
@@ -35,10 +45,9 @@ kn <- c(0,0.25,0.5,0.75,1) # fixed knots
 sb <- bs(sb.dailygrid,degree=2,knots=kn,Boundary.knots=c(0,1))
 sb <- sb[,-dim(sb)[2]] # extra col because I specify all knots
 
-sb
-kn
-
-
+Bmat <- rep(1,30)%x%sb # 30 days + 15 min in tw
+Bmat <- rbind(Bmat,Bmat[1,]) # additional 15 min for midnight on 10 June
+dim(Bmat) # ok only time, without space yet, dim(kt.sens)[1] = 2881
 
 
 
@@ -96,8 +105,9 @@ str(wdta$rain)
 #  - temp, humidity, wind, etc.
 
 
-### extract for 11May-10June and write to covariates csv file
-wdta$dt_iso[1:3]
+### extract tw of 11May-10June, map to ts in sensor data
+wdta$dt_iso[2205:2210]
+# ^ careful: June 1st at 7am missing! => last obs carried forward
 
 wdta$ts <- as.POSIXct(strptime(wdta$dt_iso,
                                format='%Y-%m-%d %H:%M:%S',
@@ -114,15 +124,34 @@ wdta$ts[1:3]
 range(kt.sens$ts)
 
 wdta.tw <- which(wdta$ts >= min(kt.sens$ts)-60*30 & wdta$ts <= max(kt.sens$ts))
-length(wdta.tw) # 720 obs within tw
+length(wdta.tw) # 720 obs within tw, but one obs missing on June 1st
 
-summary(wdta$ts[wdta.tw]) # looks ok, just shifted by 30 minutes...
+summary(wdta$ts[wdta.tw]) # annoying: hourly and shifted by 30 minutes...
 
-weather.df <- data.frame('ts'=wdta$ts[wdta.tw])
-weather.df$temperature <- wdta$main$temp[wdta.tw]
+wdta$ts[wdta.tw][1:5]
+
+mapped.wdta.tw <- c(rep(wdta.tw[1],2),
+                    rep(wdta.tw[2:517],each=4),
+                    rep(wdta.tw[518],8), # missing June 1 at 12:30 => last obs
+                    rep(wdta.tw[-(1:518)],each=4))
+mapped.wdta.tw <- mapped.wdta.tw[-length(mapped.wdta.tw)] # one too many
+length(mapped.wdta.tw)
+
+cbind(as.character(kt.sens$ts[1:10]),
+      as.character(wdta$ts[mapped.wdta.tw][1:10]))
+cbind(as.character(kt.sens$ts[2872:2881]),
+      as.character(wdta$ts[mapped.wdta.tw][2872:2881]))
+# ^ now corresponds now to kt.sens$ts
+
+
+
+### create csv of weather covariates
+
+weather.df <- data.frame('ts'=wdta$ts[mapped.wdta.tw])
+weather.df$temperature <- wdta$main$temp[mapped.wdta.tw]
 weather.df$temperature <- weather.df$temperature-273.15 # convert to celsius
-weather.df$humidity <- wdta$main$humidity[wdta.tw]
-weather.df$windspeed <- wdta$wind$speed[wdta.tw]
+weather.df$humidity <- wdta$main$humidity[mapped.wdta.tw]
+weather.df$windspeed <- wdta$wind$speed[mapped.wdta.tw]
 # ^ stick to those for now
 
 str(weather.df)
