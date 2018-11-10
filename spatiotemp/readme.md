@@ -40,6 +40,7 @@ Kaiterra_11May-10June_coord.csv
 
 123 rows = 18 locations are which we have sensors + 105 extra locations obtained
 by constrained Delaunay triangulation within a projected rectangle with corners:
+
 |   |     utmx |     utmy |
 |---|----------|----------|
 | 1 | 699.1732 | 3143.883 |
