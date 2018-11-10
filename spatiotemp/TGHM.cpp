@@ -1,8 +1,9 @@
 // TGHM: toy geostatistical hierarchical model
-//   meas eq: log y(s,t) = z(s,t)*beta + X(s,t) + epsilon(s,t)
+//   meas eq: log y(s,t) = z(s,t)*beta + B(t)*alpha + X(s,t) + epsilon(s,t)
 //   proc eq: X(s,t) = phi*X(s,t-1) + delta(s,t),
 // where
 //   - z(s,t) is p-vector of fixed covariate
+//   - B(t) is a J-vector of quadratic B-spline bases for daily seasonal effect
 //   - X(s,t) is dynamic spatial random field, mean 0
 //   - epsilon(s,t) is iid Gaussian, mean 0, constant variance sigmaepsilon^2
 //   - delta(s,t) is Gaussian, mean 0, temporally indep, st isotropic expo cov
@@ -14,9 +15,17 @@
 //                 points, so that obsind can be used to restrict obs likelihood
 //                 contribution to sampled locations/times.
 // Dimensions: nS = total nb of locations, nT = total nb of time points
-// v0.4
-//   - added interceptonly binary argument, if 1 then z(s,t) is ignored and only
-//     first entry of beta is used for intercept
+// v0.5
+//   - Added seasonal temporal effect with quadratic B-spline basis input as
+//     fixed covariate. J=6 bases, 5 knots, 4 intervals partitioning one day:
+//       * 00:00-05:45
+//       * 06:00-11:45
+//       * 12:00-17:45
+//       * 18:00-23:45
+//     J=6 alpha to estimate, only 4 free because constraints for continuity and
+//     differentiability at boundaries. Intercept now absorbed in seasonal
+//     effect.
+//  - Now consider linear trend + weather covariates in zmat, no change below.
 
 #include <TMB.hpp>
 
@@ -49,10 +58,13 @@ Type objective_function<Type>::operator() () {
 	// ^ can include NA_real_ entries from R, obsind sorts them
 	DATA_IVECTOR(obsind); // 1 if log_y available, 0 if missing, dim nT*nS
 	DATA_MATRIX(zmat); // matrix of deterministic covariates, dim (nT*nS x p)
+	DATA_MATRIX(Bmat); // matrix of B-splines bases, dim (nT*nS x J)
+	DATA_VECTOR(kn); // vector of B-spline knots, incl boundaries, dim J-1
 	DATA_MATRIX(distmat); // distances between locations, dim (nS x nS)
 
 	// Fixed parameters
 	PARAMETER_VECTOR(beta); // deterministic fixed fx, dim p
+	PARAMETER_VECTOR(alpha); // daily seasonal effect, B-spline coeff, dim J-2
 	PARAMETER(log_sigmaepsilon); // log sd meas error
 	PARAMETER(t_phi); // transformed AR(1) coeff
 	PARAMETER(log_gamma); // log expo decaying spatial covariance
@@ -62,16 +74,19 @@ Type objective_function<Type>::operator() () {
 	PARAMETER_VECTOR(X); // AR(1) in time + spatially corr proc err, dim nT*nS
 
 	// misc
-	DATA_INTEGER(interceptonly); // 0 = full z(s,t)*beta , 1 = only intercept
+	DATA_INTEGER(interceptonly); // 0 = z(s,t)*beta+season , 1 = only intercept
 
 
 	//--------------------------------------------------------------------------
 	// Setup, procedures and init
 	//--------------------------------------------------------------------------
 
+	int i,j,t; // init counters
+
 	int n = log_y.size(); // n = nT*nS = total number of obs
 	int nS = distmat.rows(); // total number of locations, incl missing values
 	int nT = n/nS; // total number of time points, incl missing values
+	int J = alpha.size()+2; // nb quadratic splines for daily seasonality
 
 	Type sigmaepsilon = exp(log_sigmaepsilon);
 	Type phi = bound11(t_phi); // transform so that within [-1,+1]
@@ -79,7 +94,14 @@ Type objective_function<Type>::operator() () {
 	Type sigmadelta = exp(log_sigmadelta); // needed for ADREPORT
 	Type sigmadelta2 = square(sigmadelta);
 	
-	int i,j,t; // init counters
+	vector<Type> alphavec(J); // J=6 bases normally
+	for (i=0; i<(J-2); i++){
+		alphavec(i) = alpha(i); // 1st J-2 free, only last 2 constrained
+	}
+	alphavec(J-2) = alpha(0) + (alpha(0)-alpha(1))*
+	                 (kn(J-2)-kn(J-3))/(kn(1)-kn(0));
+	// ^ constraint: differentiability at boundaries
+	alphavec(J-1) = alphavec(0); // constraint: continuity at boundaries
 
 	Type nll = 0.0; // init neg loglik
 
@@ -125,11 +147,13 @@ Type objective_function<Type>::operator() () {
 	// Obs eq
 	//--------------------------------------------------------------------------
 
-	if (interceptonly==0){ // covariates in zmat
-		vector<Type> detfx = zmat*beta; // linear combination, dim nT*nS=n
+	if (interceptonly==0){ // covariates in zmat + daily seasonality
+		vector<Type> detfx = zmat*beta; // lin comb, dim nT*nS=n
+		vector<Type> season = Bmat*alphavec; // lin comb, dim nT*nS=n
 		for (i = 0; i < n; i++){ // loop over all observations
 			if (obsind(i)==1){ // lkhd contrib only where/when data available
-				nll -= dnorm(log_y(i), detfx(i) + X(i), sigmaepsilon, true);
+				nll -= dnorm(log_y(i), detfx(i) + season(i) + X(i),
+							 sigmaepsilon, true);
 				// ^ iid measurement error
 			}
 		}
@@ -153,6 +177,7 @@ Type objective_function<Type>::operator() () {
 	// REPORT(detfx);
 
 	ADREPORT(beta); // necessary?
+	ADREPORT(alphavec);
 	ADREPORT(sigmaepsilon);
 	ADREPORT(phi);
 	ADREPORT(gamma);

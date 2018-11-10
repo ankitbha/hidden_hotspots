@@ -1,6 +1,6 @@
-#//////////////////////////////////////////////////////////////////
-#### 2018-11-09 Kaiterra csv 11May-10June, test B-spline basis ####
-#//////////////////////////////////////////////////////////////////
+#//////////////////////////////////////////////////////////////////////////////////
+#### 2018-11-09 Kaiterra csv 11May-10June, extra loc, B-spline basis, save txt ####
+#//////////////////////////////////////////////////////////////////////////////////
 
 rm(list=ls())
 paf2drop <- '/Users/WAWA/Desktop/Dropbox'
@@ -25,6 +25,10 @@ kt.weat$ts <- as.POSIXct(strptime(kt.weat$ts,
 # kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
 str(kt.weat)
 # ^ hourly data only, no spatial info, for whole Delhi
+
+
+### prepare extra locations # here!!! 
+
 
 
 
