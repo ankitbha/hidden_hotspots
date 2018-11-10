@@ -1,6 +1,52 @@
-#////////////////////////////////////////////////////////////////////////////
-#### 2018-11-09 Kaiterra csv 11May-10June, check weather data from Ulzee ####
-#////////////////////////////////////////////////////////////////////////////
+#//////////////////////////////////////////////////////////////////
+#### 2018-11-09 Kaiterra csv 11May-10June, test B-spline basis ####
+#//////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+kt.loc <- read.table('Kaiterra_11May-10June_loc.csv',sep=',',header=T)
+kt.sens <- read.table('Kaiterra_11May-10June_pm25.csv',sep=',',header=T)
+
+str(kt.loc)
+
+kt.sens$ts <- as.POSIXct(strptime(kt.sens$ts,
+                                  format='%Y-%m-%d %H:%M',
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+# kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(kt.sens)
+
+### create quadratic B-spline basis, assuming day is [0,1]
+library(splines)
+
+sb.dailygrid <- seq(0,1,length.out=96)
+# ^ 24*4=96 obs per day
+
+kt.sens$ts[1:26]
+sb.dailygrid[1:26]
+# ^ 2nd knot = 0.25 => first 24 obs in first sub-interval, ok
+
+kn <- c(0,0.25,0.5,0.75,1) # fixed knots
+# nb bases = J=6
+# degree=2: nb knots = N = J-1, nb intervals = N-1 = J-2
+
+sb <- bs(sb.dailygrid,degree=2,knots=kn,Boundary.knots=c(0,1))
+sb <- sb[,-dim(sb)[2]] # extra col because I specify all knots
+
+sb
+kn
+
+
+
+
+
+
+
+#/////////////////////////////////////////////////////////////////////////
+#### 2018-11-09 Kaiterra 11May-10June, write weather data json to csv ####
+#/////////////////////////////////////////////////////////////////////////
 
 rm(list=ls())
 paf2drop <- '/Users/WAWA/Desktop/Dropbox'
@@ -20,16 +66,17 @@ str(kt.sens)
 
 
 ### weather data from Ulzee
+pafjsondata <- paste0(paf2drop,'/PostDoc/AirPollution/Data/KaiterraSensors2018/open_weather_newdelhi.json')
+
 # library(rjson)
 # 
-# pafjsondta <- paste0(paf2drop,'/PostDoc/AirPollution/Data/KaiterraSensors2018/open_weather_newdelhi.json')
 # 
-# jsondta <- fromJSON(file=pafjsondta,simplify=T)
+# jsondta <- fromJSON(file=pafjsondata,simplify=T)
 # str(unlist(jsondta),1) # annoying to deal with
 
 library(jsonlite)
 
-wdta <- jsonlite::fromJSON(txt=pafjsondta)
+wdta <- jsonlite::fromJSON(txt=pafjsondata)
 str(wdta,1) # better, dataframe
 
 table(wdta$city_id) # only 1 city id
@@ -39,10 +86,9 @@ sum(is.na(wdta$main)) # no missing values
 str(wdta$wind) # df for wind speed and degree
 str(wdta$clouds) # df for some measure of cloudiness?
 str(unlist(wdta$weather),1) # long list for mist, fog, haze
-str(wdta$dt) # integer vetor, some time stamp
+str(wdta$dt) # integer vector, some time stamp
 str(wdta$dt_iso) # integer vector, time stamp UTC
 str(wdta$rain)
-
 
 ### Summary weather data: 
 #  - 1 obs per hour
@@ -50,6 +96,40 @@ str(wdta$rain)
 #  - temp, humidity, wind, etc.
 
 
+### extract for 11May-10June and write to covariates csv file
+wdta$dt_iso[1:3]
+
+wdta$ts <- as.POSIXct(strptime(wdta$dt_iso,
+                               format='%Y-%m-%d %H:%M:%S',
+                               tz="UTC")) # date/time ISO standard
+wdta$ts <- format(wdta$ts,format='%Y-%m-%d %H:%M:%S',
+                             tz="Asia/Kolkata",usetz=T)
+wdta$ts <- as.POSIXct(wdta$ts,format='%Y-%m-%d %H:%M:%S',
+                      tz="Asia/Kolkata")
+str(wdta$ts)
+attr(wdta$ts,'tz')
+# ^ tz important because hourly data and need to compare to kt.sens$ts
+wdta$ts[1:3]
+
+range(kt.sens$ts)
+
+wdta.tw <- which(wdta$ts >= min(kt.sens$ts)-60*30 & wdta$ts <= max(kt.sens$ts))
+length(wdta.tw) # 720 obs within tw
+
+summary(wdta$ts[wdta.tw]) # looks ok, just shifted by 30 minutes...
+
+weather.df <- data.frame('ts'=wdta$ts[wdta.tw])
+weather.df$temperature <- wdta$main$temp[wdta.tw]
+weather.df$temperature <- weather.df$temperature-273.15 # convert to celsius
+weather.df$humidity <- wdta$main$humidity[wdta.tw]
+weather.df$windspeed <- wdta$wind$speed[wdta.tw]
+# ^ stick to those for now
+
+str(weather.df)
+head(weather.df) # looks good
+
+write.table(weather.df,file='Kaiterra_11May-10June_weather.csv',sep=',',
+            row.names=F,col.names=T)
 
 
 
