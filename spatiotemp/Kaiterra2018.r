@@ -1,11 +1,16 @@
-#//////////////////////////////////////////////////////////////////////////////////
-#### 2018-11-09 Kaiterra csv 11May-10June, extra loc, B-spline basis, save txt ####
-#//////////////////////////////////////////////////////////////////////////////////
+#///////////////////////////////////////////////////////
+#### 2018-11-10 Kaiterra csv 11May-10June, fit v0.5 ####
+#///////////////////////////////////////////////////////
 
 rm(list=ls())
 paf2drop <- '/Users/WAWA/Desktop/Dropbox'
 paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
 setwd(paf)
+
+library(INLA) # for mesh
+library(rgdal) # for lat/lon conversion to utm
+library(OpenStreetMap) # for map downloading and plotting
+library(splines) # for B-spline basis
 
 kt.loc <- read.table('Kaiterra_11May-10June_loc.csv',sep=',',header=T)
 kt.sens <- read.table('Kaiterra_11May-10June_pm25.csv',sep=',',header=T)
@@ -26,15 +31,14 @@ kt.weat$ts <- as.POSIXct(strptime(kt.weat$ts,
 str(kt.weat)
 # ^ hourly data only, no spatial info, for whole Delhi
 
+nS <- dim(kt.loc)[1] # 18 locations
+nT <- dim(kt.sens)[1] # 2991 time points
+n <- nS*nT # 51'858, not accounting for NAs
 
-### prepare extra locations # here!!! 
-
-
+sum(is.na(kt.sens))/(nS*nT) # 36% NAs...
 
 
 ### create quadratic B-spline basis, assuming day is [0,1]
-library(splines)
-
 sb.dailygrid <- seq(0,1,length.out=96)
 # ^ 24*4=96 obs per day
 
@@ -52,6 +56,104 @@ sb <- sb[,-dim(sb)[2]] # extra col because I specify all knots
 Bmat <- rep(1,30)%x%sb # 30 days + 15 min in tw
 Bmat <- rbind(Bmat,Bmat[1,]) # additional 15 min for midnight on 10 June
 dim(Bmat) # ok only time, without space yet, dim(kt.sens)[1] = 2881
+
+
+
+
+#//////////////////////////////////////////////////////////////////////////
+#### 2018-11-09 Kaiterra csv 11May-10June, extra loc inlamesh save csv ####
+#//////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(INLA) # for mesh
+library(rgdal) # for lat/lon conversion to utm
+library(OpenStreetMap) # for map downloading and plotting
+
+kt.loc <- read.table('Kaiterra_11May-10June_loc.csv',sep=',',header=T)
+kt.sens <- read.table('Kaiterra_11May-10June_pm25.csv',sep=',',header=T)
+kt.weat <- read.table('Kaiterra_11May-10June_weather.csv',sep=',',header=T)
+
+str(kt.loc)
+
+kt.sens$ts <- as.POSIXct(strptime(kt.sens$ts,
+                                  format='%Y-%m-%d %H:%M',
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+# kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(kt.sens)
+
+kt.weat$ts <- as.POSIXct(strptime(kt.weat$ts,
+                                  format='%Y-%m-%d %H:%M',
+                                  tz="Asia/Kolkata")) # date/time ISO standard
+# kt.sens$ts <- format(kt.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(kt.weat)
+# ^ hourly data only, no spatial info, for whole Delhi
+
+nS <- dim(kt.loc)[1] # 18 locations
+nT <- dim(kt.sens)[1] # 2991 time points
+n <- nS*nT # 51'858, not accounting for NAs
+
+sum(is.na(kt.sens))/(nS*nT) # 36% NAs...
+
+
+
+### use INLA to create grid of locations by Delaunay triangulation
+coord <- kt.loc[,c('utmx','utmy')]
+apply(coord,2,range) # determine borders of domain
+
+mar.mesh <- 1.0 # beyond range of obs locations
+coord.border <- data.frame('utmx'=c(min(coord$utmx)-mar.mesh,
+                                    rep(max(coord$utmx)+mar.mesh,2),
+                                    rep(min(coord$utmx)-mar.mesh,2)),
+                           'utmy'=c(rep(min(coord$utmy)-mar.mesh,2),
+                                    rep(max(coord$utmy)+mar.mesh,2),
+                                    min(coord$utmy)-mar.mesh))
+# ^ 4 corners, last=first to close domain, mar.mesh beyond observed range
+
+system.time(inlamesh <- inla.mesh.2d(loc=coord, # coordinates in UTM
+                                     loc.domain=coord.border,
+                                     offset=1, #                  | offset=1
+                                     max.edge=5, #                | max.edge=5
+                                     min.angle=10, #              | min.angle=20
+                                     # max.n=1000, # overrides max.edge
+                                     cutoff=0,
+                                     plot.delay=NULL))
+inlamesh$n # not too many locations if possible
+
+plot(inlamesh)
+lines(coord.border,lwd=3,col='blue')
+points(coord$utmx,coord$utmy,pch=20,cex=1.5,col=2)
+
+plot(inlamesh$loc[,1],inlamesh$loc[,2],pch=8,cex=1,col='deeppink')
+lines(coord.border,lwd=3,col='blue') # well-spread?
+
+coord.mesh <- data.frame('utmx'=inlamesh$loc[,1],'utmy'=inlamesh$loc[,2])
+# ^ to be used for predictions and mapping
+
+which(coord.mesh[,1]%in%coord[,1])
+which(coord.mesh[,2]%in%coord[,2])
+# ^ original points are included in the mesh locations, arbitrary position
+
+coord.mesh <- coord.mesh[-which(coord.mesh[,1]%in%coord[,1]),]
+str(coord.mesh)
+points(coord.mesh[,1],coord.mesh[,2],pch=8,cex=1,col='limegreen')
+# ^ only 105 locations left, only the extra ones
+
+nS.mesh <- dim(coord.mesh)[1] # 105 extra locations
+nS.full <- nS+nS.mesh # 123 total nb locations
+n.full <- nT*nS.full # 354'363, incl pred locations and not accounting for NAs
+
+coord.df <- data.frame(rbind(coord,coord.mesh))
+coord.df$observed <- c(rep(1L,nS),rep(0L,dim(coord.mesh)[1]))
+
+
+write.table(coord.df,file='Kaiterra_11May-10June_coord.csv',sep=',',
+            row.names=F,col.names=T)
+
+
 
 
 
