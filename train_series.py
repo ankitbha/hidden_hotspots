@@ -23,12 +23,14 @@ from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
-def plot_preview(epoch, segdef, target, segments, predictions, loss, histlen, criterion, norm=100.0):
-    imgname = 'preview/pred_%d_epoch_%d.png' % (args.target, epoch)
-    currname = 'pred_%d_best.png' % (args.target)
 
-    tf = time.mktime(datetime.strptime(segdef['end'], '%m/%d/%Y').timetuple())
-    t0 = tf - 5 * 60 * len(predictions)
+def plot_preview(tag, epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5, weather=None):
+    (start, end, locations) = seginfo
+    # imgname = 'preview/%s_pred_%d_epoch_%d.png' % (tag, target, epoch)
+    currname = 'images/plots/%s_pred_%d_best.png' % (tag, target)
+
+    tf = time.mktime(datetime.strptime(end, '%m/%d/%Y').timetuple())
+    t0 = tf - interval * 60 * len(predictions)
     startstr = datetime.fromtimestamp(t0).strftime("%m/%d/%Y")
     dstr = datetime.fromtimestamp(tf).strftime("%m/%d/%Y")
     # print(startstr, dstr)
@@ -39,9 +41,11 @@ def plot_preview(epoch, segdef, target, segments, predictions, loss, histlen, cr
     for sii, seg in enumerate(segments):
         if sii != target:
             pl = plt.plot(seg*norm, color='#CCCCCC')
-            legend.append((pl, segdef['locations'][sii][0]))
+            legend.append((pl, locations[sii]))
     pl = plt.plot(segments[target, :]*norm, color='C0')
-    legend.append((pl, segdef['locations'][target][0] + ' (target)'))
+    legend.append((pl, locations[target] + ' (target)'))
+    if weather is not None:
+        plt.plot(weather * 50, color='red')
 
     # mean of all other measurements at time tt
     avgseries = np.zeros(segments.shape[1])
@@ -64,19 +68,29 @@ def plot_preview(epoch, segdef, target, segments, predictions, loss, histlen, cr
     pl = plt.plot(np.array(predictions)*norm, color='C1')
     legend.append((pl, 'target preds.'))
 
-    plt.gca().set_title('LSTM NN MSE: %.3f    Naive avg. MSE: %.3f' % (
+    plt.gca().set_title('iter: %d  LSTM NN MSE: %.3f  Naive avg. MSE: %.3f' % (
+        epoch,
         loss*norm**2,
         avgloss*norm**2))
     plts, lbls = zip(*legend)
     plts = [pl[0] for pl in plts] # ?? actual ref is first elem?
-    plt.legend(plts, lbls)
+    plt.legend(plts, lbls, prop={'size': 6})
     plt.xticks([0, len(predictions)-1], [startstr, dstr])
-    plt.savefig(imgname, bbox_inches='tight')
+    # plt.savefig(imgname, bbox_inches='tight')
+
     plt.savefig(currname, bbox_inches='tight')
     plt.close()
 
+    for sii, seg in enumerate(segments):
+        plt.figure(figsize=(14, 4))
+        plt.title(locations[sii])
+        plt.plot(seg*norm)
+        plt.savefig('debug/%s.jpg' % locations[sii], bbox_inches='tight')
+        plt.close()
+
     return avgloss
 
+prevloss = 100000000
 if __name__ == '__main__':
     # set random seed to 0
     np.random.seed(0)
@@ -88,7 +102,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for all; check configs...')
+    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for govdata; check configs...')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     parser.add_argument('--load', type=str, default=None)
@@ -100,10 +114,44 @@ if __name__ == '__main__':
     # device = torch.device("cpu")
     log = SummaryWriter()
 
-    # TODO: ability to train on all segments
-    use_segment = SEGMENTS[args.segment]
-    numsegments = len(use_segment['locations'])
-    (train_data, test_data), metadata = create_dataset(use_segment)
+    if args.segment == -1:
+        (train_data, test_data), metadata = create_dataset_gov()
+        numsegments = train_data.shape[0]
+        start_date, end_date = '08/01/2018','10/01/2018'
+        location_names = metadata[2]
+        time_interval = 15        # 15 minutes
+        tag = 'gov'
+    elif args.segment == -2: # gov + our data
+        USESEG = 0
+        bad_govs = EXCLUDE[USESEG]
+        seg = SEGMENTS[USESEG]
+        assert args.target < len(seg['locations'])
+        (train_data, test_data), (_, _, location_names) = create_dataset_joint(
+            seg, exclude=bad_govs)
+        numsegments = train_data.shape[0]
+        start_date, end_date = seg['start'], seg['end']
+        time_interval = 15        # gov data upsamped to 5 mins
+        tag = 'joint'
+    elif args.segment == -3: # gov + our data
+        USESEG = 0
+        bad_govs = EXCLUDE[USESEG]
+        seg = SEGMENTS[USESEG]
+        assert args.target < len(seg['locations'])
+        (train_data, test_data), location_names = create_dataset_weather(
+            seg, exclude=bad_govs)
+        numsegments = train_data.shape[0]
+        start_date, end_date = seg['start'], seg['end']
+        time_interval = 15        # gov data upsamped to 5 mins
+        tag = 'weather'
+    else:
+        # FIXME: update set metadata variables
+        use_segment = SEGMENTS[args.segment]
+        numsegments = len(use_segment['locations'])
+        (train_data, test_data), metadata = create_dataset(use_segment)
+        tag = 'ours'
+        start_date, end_date = use_segment['start'], use_segment['end']
+        location_names = [name[0] for name in use_segment['locations']]
+        time_interval =15
 
     if args.load is not None:
         print(' Loading:', args.load)
@@ -202,22 +250,32 @@ if __name__ == '__main__':
         log.add_scalar('test/loss', series_loss, n_iter)
         print('\n   Testing Loss:  %.3f      Testing MAPE: %.1f%%' % (series_loss * 100.0**2, series_mape))
 
-        if eii % 10 == 0:
+        if series_loss < prevloss:
+            prevloss = series_loss
             mse_avg = plot_preview(
+                tag,
                 eii,
-                use_segment,
+                (start_date, end_date, location_names),
                 args.target,
-                test_data,
+                test_data[:-1] if args.segment == -3 else test_data,
                 continuous,
                 series_loss,
                 args.history,
-                criterion)
+                criterion,
+                interval=time_interval,
+                weather=test_data[-1] if args.segment == -3 else None)
 
-            with open('outputs/seg_%d_targ_%d.txt' % (args.segment, args.target), 'w') as fl:
-                fl.write('MAPE:%.3f\n' % series_mape)
-                fl.write('MSE_TEST:%.3f\n' % (series_loss * 100.0**2))
-                fl.write('MSE_AVG:%.3f\n' % (mse_avg * 100.0**2))
-                fl.write('MSE_TRAIN:%.3f\n' % (loss.item() * 100.0**2))
+        logfile = 'outputs/%s_seg_%d_targ_%d.txt' % (tag, args.segment, args.target)
+        if eii == 1:
+            with open(logfile, 'w') as fl:
+                fl.write('')
+        # if eii % 5 == 0:
+        with open(logfile, 'a') as fl:
+            fl.write('EPOCH:%d\n' % eii)
+            fl.write('MAPE:%.3f\n' % series_mape)
+            fl.write('MSE_TEST:%.3f\n' % (series_loss * 100.0**2))
+            fl.write('MSE_AVG:%.3f\n' % (mse_avg * 100.0**2))
+            fl.write('MSE_TRAIN:%.3f\n' % (loss.item() * 100.0**2))
 
         if args.once:
             break
