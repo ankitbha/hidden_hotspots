@@ -1,6 +1,6 @@
-#//////////////////////////////////////////////////////
-#### 2018-11-03 Kaiterra csv 11May-10June, here!!! ####
-#//////////////////////////////////////////////////////
+#////////////////////////////////////////////////////////////////////////////
+#### 2018-11-09 Kaiterra csv 11May-10June, check weather data from Ulzee ####
+#////////////////////////////////////////////////////////////////////////////
 
 rm(list=ls())
 paf2drop <- '/Users/WAWA/Desktop/Dropbox'
@@ -19,10 +19,35 @@ kt.sens$ts <- as.POSIXct(strptime(kt.sens$ts,
 str(kt.sens)
 
 
+### weather data from Ulzee
+# library(rjson)
+# 
+# pafjsondta <- paste0(paf2drop,'/PostDoc/AirPollution/Data/KaiterraSensors2018/open_weather_newdelhi.json')
+# 
+# jsondta <- fromJSON(file=pafjsondta,simplify=T)
+# str(unlist(jsondta),1) # annoying to deal with
+
+library(jsonlite)
+
+wdta <- jsonlite::fromJSON(txt=pafjsondta)
+str(wdta,1) # better, dataframe
+
+table(wdta$city_id) # only 1 city id
+
+str(wdta$main) # df for temp, pressure and humidity, 5649 obs
+sum(is.na(wdta$main)) # no missing values
+str(wdta$wind) # df for wind speed and degree
+str(wdta$clouds) # df for some measure of cloudiness?
+str(unlist(wdta$weather),1) # long list for mist, fog, haze
+str(wdta$dt) # integer vetor, some time stamp
+str(wdta$dt_iso) # integer vector, time stamp UTC
+str(wdta$rain)
 
 
-
-
+### Summary weather data: 
+#  - 1 obs per hour
+#  - no spatial resolution, single obs for the whole city of Delhi
+#  - temp, humidity, wind, etc.
 
 
 
