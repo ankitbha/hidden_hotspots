@@ -38,7 +38,7 @@ Coarse spatial resolution: variables not geo-referenced so for the whole Delhi.
 Kaiterra_11May-10June_coord.csv
 -------------------------------
 
-123 rows = 18 locations are which we have sensors + 105 extra locations obtained
+54 rows = 18 locations are which we have sensors + 36 extra locations obtained
 by constrained Delaunay triangulation within a projected rectangle with corners:
 
 |   |     utmx |     utmy |
