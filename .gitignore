@@ -8,7 +8,7 @@ __pycache__/
 runs
 *.DS_Store
 *.pth
-*.csv
+
 # C extensions
 *.so
 <<<<<<< HEAD
@@ -112,3 +112,5 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# CUSTOM
