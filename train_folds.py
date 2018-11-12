@@ -35,7 +35,7 @@ if __name__ == '__main__':
 	parser.add_argument('--history', type=int, required=True, help='Length of history')
 	parser.add_argument('--mode', type=int, required=True, help='Train data type')
 	parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
-	parser.add_argument('--fold', type=int, required=True)
+	parser.add_argument('--fold', type=int)
 
 	parser.add_argument('--hidden', type=int, default=25)
 	parser.add_argument('--lr', type=float, default=1e-3)
@@ -51,12 +51,14 @@ if __name__ == '__main__':
 	# device = torch.device("cpu")
 	log = SummaryWriter()
 
+	split = 0.8 if args.fold is None else 1.0
+
 	DEFAULTSEG = 3
 	if args.mode == 0:
 		# gov data only
 		seg = SEGMENTS[DEFAULTSEG]
 		assert args.target < len(seg['locations'])
-		(train_data, test_data), _ = create_dataset(seg)
+		(train_data, test_data), _ = create_dataset(seg, split=split)
 		location_names = [nm[0] for nm in seg['locations']]
 		numsegments = train_data.shape[0]
 		start_date, end_date = seg['start'], seg['end']
@@ -68,7 +70,7 @@ if __name__ == '__main__':
 		seg = SEGMENTS[DEFAULTSEG]
 		assert args.target < len(seg['locations'])
 		(train_data, test_data), (_, _, location_names) = create_dataset_joint(
-			seg, exclude=bad_govs)
+			seg, exclude=bad_govs, split=split)
 		numsegments = train_data.shape[0]
 		start_date, end_date = seg['start'], seg['end']
 		time_interval = 15
@@ -78,7 +80,7 @@ if __name__ == '__main__':
 		seg = SEGMENTS[DEFAULTSEG]
 		assert args.target < len(seg['locations'])
 		(train_data, test_data), location_names = create_dataset_weather(
-			seg)
+			seg, split=split)
 		numsegments = train_data.shape[0]
 		start_date, end_date = seg['start'], seg['end']
 		time_interval = 15
@@ -89,13 +91,19 @@ if __name__ == '__main__':
 		seg = SEGMENTS[DEFAULTSEG]
 		assert args.target < len(seg['locations'])
 		(train_data, test_data), location_names = create_dataset_joint_weather(
-			seg, exclude=bad_govs)
+			seg, exclude=bad_govs, split=split)
 		numsegments = train_data.shape[0]
 		start_date, end_date = seg['start'], seg['end']
 		time_interval = 15
 		tag = 'joint_w'
 	else:
 		raise Exception('Unknown training mode!')
+
+	nFolds = 9
+	if args.fold is not None:
+		unit = train_data.shape[1] / nFolds
+		test_data = train_data[:, int(unit*args.fold):int(unit*(args.fold+1))]
+		# print(test_data.shape)
 
 	if args.load is not None:
 		print(' Loading:', args.load)
@@ -106,7 +114,6 @@ if __name__ == '__main__':
 			historylen=args.history,
 			numsegments=numsegments,
 			hiddensize=args.hidden).to(device).double()
-
 
 	# mean-squared loss criterion works reasonably for estimating real
 	# values
@@ -120,6 +127,7 @@ if __name__ == '__main__':
 		numseqs = 0
 		seqinds = []
 		for ind in range(0, train_data.shape[1] - seqlen, args.stride):
+			# if args.fold is not None:
 			seqinds.append(ind)
 			assert ind < train_data.shape[1]
 			numseqs += 1
@@ -184,12 +192,14 @@ if __name__ == '__main__':
 			continuous.append(predval)
 
 			loss = criterion(preds, batch_lbls)
-			series_loss += loss.detach().cpu().numpy()
+			loss = loss.detach().cpu().numpy()
+			assert loss >= 0
+			series_loss += loss
 			batch_lbls = batch_lbls.detach().squeeze().cpu().numpy()
 			preds = preds.detach().squeeze().cpu().numpy()
 			series_mape += np.abs((preds - batch_lbls) / batch_lbls)
-		series_loss /= (test_data.shape[1] - seqlen)
-		series_mape /= (test_data.shape[1] - seqlen)
+		series_loss /= (test_data.shape[1])
+		series_mape /= (test_data.shape[1])
 		series_mape *= 100.0
 		log.add_scalar('test/loss', series_loss, n_iter)
 		print('\n   Testing Loss:  %.3f      Testing MAPE: %.1f%%' % (series_loss * 100.0**2, series_mape))
