@@ -234,12 +234,42 @@ def create_dataset_joint(segdef, split=0.8, fillmethod=pad_valid, exclude=[], up
 	return (train_data, test_data), (None, None, ournames + govnames)
 
 
-def create_dataset_weather(segdef, split=0.8, fillmethod=pad_valid, exclude=[], upsamp=None):
+def create_dataset_joint_weather(segdef, split=0.8, fillmethod=pad_valid, exclude=[], upsamp=None):
 	(datamat, _), (_, _, names) = create_dataset_joint(
 		segdef, 1.0, fillmethod, exclude, upsamp)
 
 	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
 	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
+
+	with open('./data/open_weather_newdelhi.json') as fl:
+		paid_data = json.load(fl)
+	from datetime import date
+
+	d0 = datetime(2018, 3, 1)
+	w0 = int((t0 - d0).total_seconds() // (60 * 60)) + 5
+	wf = int((tf - d0).total_seconds() // (60 * 60)) + 5
+	# print(w0, wf, len(paid_data))
+	wdata = [ent['main']['temp'] for ent in paid_data[w0:wf]]
+	wdata = np.array(wdata)
+	wdata -= 273.15  # kelvins to celsius
+	wdata /= 50 # normalize celsius
+	wdata = np.repeat(wdata, 4, axis=0)
+	# print(datamat.shape, wdata.shape)
+	datamat = np.concatenate([datamat[:, :-1], np.array([wdata])], axis=0)
+
+	splitind = int(datamat.shape[1] * split)
+	train_data, test_data = datamat[:, :splitind], datamat[:, splitind:]
+	print('Train test split:  %d / %d' % (splitind, datamat.shape[1] - splitind))
+	assert len(names) == len(train_data) - 1
+	return (train_data, test_data), names
+
+def create_dataset_weather(segdef, split=0.8, fillmethod=pad_valid, upsamp=None):
+	(datamat, _), _ = create_dataset(
+		segdef, split=1.0)
+
+	t0 = datetime.strptime(segdef['start'], '%m/%d/%Y')
+	tf = datetime.strptime(segdef['end'], '%m/%d/%Y')
+	names = [nm[0] for nm in segdef['locations']]
 
 	with open('./data/open_weather_newdelhi.json') as fl:
 		paid_data = json.load(fl)

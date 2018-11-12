@@ -134,10 +134,20 @@ if __name__ == '__main__':
         tag = 'joint'
     elif args.segment == -3: # gov + our data
         USESEG = 0
-        bad_govs = EXCLUDE[USESEG]
         seg = SEGMENTS[USESEG]
         assert args.target < len(seg['locations'])
         (train_data, test_data), location_names = create_dataset_weather(
+            seg)
+        numsegments = train_data.shape[0]
+        start_date, end_date = seg['start'], seg['end']
+        time_interval = 15        # gov data upsamped to 5 mins
+        tag = 'wours'
+    elif args.segment == -4: # gov + our data
+        USESEG = 0
+        bad_govs = EXCLUDE[USESEG]
+        seg = SEGMENTS[USESEG]
+        assert args.target < len(seg['locations'])
+        (train_data, test_data), location_names = create_dataset_joint_weather(
             seg, exclude=bad_govs)
         numsegments = train_data.shape[0]
         start_date, end_date = seg['start'], seg['end']
