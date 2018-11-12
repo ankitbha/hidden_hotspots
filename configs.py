@@ -47,6 +47,19 @@ SEGMENTS = [
         'start': '07/10/2018',
         'end': '07/24/2018',
     },
+
+    {
+        'locations': [
+            ('U.S. Embassy', 'CBC7'),
+            ('Kailas Office', 'A9BE'),
+            ('Nischal', 'C0A7'),
+            ('Nita', '5D7A'),
+            ('Priti Sood Sayeed', 'E47A'),
+            ('Arun Duggal', '20CA'),
+        ],
+        'start': '05/11/2018',
+        'end': '06/10/2018',
+    },
 ]
 
 

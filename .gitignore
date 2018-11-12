@@ -1,5 +1,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+wbio
+images
+outputs
 *.py[cod]
 *.avi
 *.mp4
