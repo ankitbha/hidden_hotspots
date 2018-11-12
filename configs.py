@@ -75,13 +75,15 @@ EXCLUDE = {
         'ITO, New Delhi - CPCB',
         'Punjabi Bagh, Delhi - DPCC',
     ],
-    # 2: [
-    #     'Sirifort, New Delhi - CPCB',
-    #     'Punjabi Bagh, Delhi - DPCC',
+    # TODO: segment 2
 
-    #     # 'Lodhi Road, New Delhi - IMD',
-    #     # 'Jawaharlal Nehru Stadium, Delhi - DPCC',
-    #     # 'Lodhi Road, New Delhi - IMD',
-    #     # 'Sri Aurobindo Marg, Delhi - DPCC',
-    # ]
+    3: [
+        'Sirifort, New Delhi - CPCB',
+        'Dr. Karni Singh Shooting Range, Delhi - DPCC',
+        'Sri Aurobindo Marg, Delhi - DPCC',
+        'Lodhi Road, New Delhi - IMD',
+        'ITO, New Delhi - CPCB',
+        'Mandir Marg, New Delhi - DPCC',
+        'CRRI Mathura Road, New Delhi - IMD',
+    ],
 }
