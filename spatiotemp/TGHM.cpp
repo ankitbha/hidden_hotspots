@@ -25,7 +25,7 @@
 //     J=6 alpha to estimate, only 4 free because constraints for continuity and
 //     differentiability at boundaries. Intercept now absorbed in seasonal
 //     effect.
-//  - Now consider linear trend + weather covariates in zmat, no change below.
+//  - Now consider weather covariates in zmat, no change below.
 
 #include <TMB.hpp>
 

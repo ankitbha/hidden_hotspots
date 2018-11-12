@@ -1,13 +1,821 @@
-#////////////////////////////////////////////////////////////////////////////
-#### 2018-11-11 Kaiterra csv 11May-10June, v0.5 cs, CV in space and time ####
-#////////////////////////////////////////////////////////////////////////////
+#//////////////////////////////////////////////////////////////////////////
+#### 2018-11-11 CPCB csv 11May-10June, fit v0.5 covariates+seasonality ####
+#//////////////////////////////////////////////////////////////////////////
+
+# covariates+seasonality = cs
 
 rm(list=ls())
 paf2drop <- '/Users/WAWA/Desktop/Dropbox'
 paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
 setwd(paf)
 
-# here!!!
+library(TMB)
+library(rgdal) # for lat/lon conversion to utm
+library(OpenStreetMap) # for map downloading and plotting
+library(splines) # for B-spline basis
+library(akima) # for 2d interp
+
+colgreenred <- function(n,alpha=1){ # based on heat.colors
+  if ((n <- as.integer(n[1L])) > 0) {
+    return(rainbow(n, s=1, v=1, start=0, end=3.5/6, alpha=alpha)[n:1]) # end=2/6
+  } else {
+    return(character())
+  }
+}
+# plot(1:100,col=colgreenred(100),pch=19) # test color gradient
+
+
+### create and load function from cpp template
+# compile("TGHM.cpp")
+dyn.load(dynlib("TGHM"))
+
+
+### load csv data
+cpcb.loc <- read.table('CPCB_11May-10June_loc.csv',sep=',',header=T)
+cpcb.sens <- read.table('CPCB_11May-10June_pm25.csv',sep=',',header=T)
+cpcb.weat <- read.table('Kaiterra_11May-10June_weather.csv',sep=',',header=T)
+cpcb.coord <- read.table('CPCB_11May-10June_coord.csv',sep=',',header=T)
+# ^ same weather data as for Kaiterra data analysis
+
+str(cpcb.loc)
+str(cpcb.coord)
+
+cpcb.sens$ts <- as.POSIXct(strptime(cpcb.sens$ts,
+                                    format='%Y-%m-%d %H:%M',
+                                    tz="Asia/Kolkata")) # date/time ISO standard
+# cpcb.sens$ts <- format(cpcb.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(cpcb.sens)
+
+# sum(na.omit(unlist(cpcb.sens))==0) # ok now
+# sum(na.omit(unlist(cpcb.sens))<0) # ok now
+
+
+cpcb.weat$ts <- as.POSIXct(strptime(cpcb.weat$ts,
+                                    format='%Y-%m-%d %H:%M',
+                                    tz="Asia/Kolkata")) # date/time ISO standard
+# cpcb.sens$ts <- format(cpcb.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(cpcb.weat)
+# ^ hourly data only, no spatial info, for whole Delhi
+
+nS <- dim(cpcb.loc)[1] # 28 locations
+nT <- dim(cpcb.sens)[1] # 2881 time points
+n <- nS*nT # 80'668, not accounting for NAs
+# sum(is.na(cpcb.sens))/(nS*nT) # 12% NAs
+
+nS.full <- dim(cpcb.coord)[1] # 59 total nb locations
+nS.mesh <- nS.full-nS # 31 extra locations
+n.full <- nT*nS.full # 169'979, incl pred locations and not accounting for NAs
+
+
+### create quadratic B-spline basis, assuming day is [0,1]
+sb.dailygrid <- seq(0,1,length.out=96)
+# ^ 24*4=96 obs per day
+
+# cpcb.sens$ts[1:26]
+# sb.dailygrid[1:26]
+# ^ 2nd knot = 0.25 => first 24 obs in first sub-interval, ok
+
+kn <- c(0,0.25,0.5,0.75,1) # fixed knots
+# nb bases = J=6
+# degree=2: nb knots = N = J-1, nb intervals = N-1 = J-2
+
+sb <- bs(sb.dailygrid,degree=2,knots=kn,Boundary.knots=c(0,1))
+sb <- sb[,-dim(sb)[2]] # extra col because I specify all knots
+
+Bmat <- rep(1,30)%x%sb # 30 days + 15 min in tw
+Bmat <- rbind(Bmat,Bmat[1,]) # additional 15 min for midnight on 10 June
+# dim(Bmat) # ok only time, without space yet, dim(cpcb.sens)[1] = 2881
+
+Bmat <- rep(1,nS.full)%x%Bmat # replicate for 123 locations
+dim(Bmat) # ok n.full=169'979
+# ^ clearly inefficient and RAM-consuming...
+# ^ TODO for later: replicate within C++ template
+
+
+### create map.delhi for mapping
+range(cpcb.loc$lat)
+range(cpcb.loc$lon)
+
+corners.delhi <- list('topleft'=c(28.46, 77.02), # lat/lon
+                      'botright'=c(28.76, 77.32)) # lat/lon
+map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
+                     zoom=NULL,type='stamen-toner') # type='osm'
+
+df.latlon <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.latlon.sp <- spTransform(df.latlon,osm())
+
+plot(map.delhi,removeMargin=F)
+points(df.latlon.sp,pch=19,col='blue')
+axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+title(main="CPCB/DPCC/IMD monitors Mar-Oct 2018, tw 2018-05-11 - 2018-06-10",
+      xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+
+
+
+### prep response vec and design for full spatial grid for X pred
+coord.full <- as.matrix(cpcb.coord[,-3]) # extra locations at end, easier
+
+proj.string <- "+proj=utm +zone=43 +ellps=WGS84 +north +units=km"
+# ^ Delhi = UTM zone 43R
+df.coord.full <- SpatialPoints(coord.full,proj4string=CRS(proj.string))
+coord.full.osm <- spTransform(df.coord.full,map.delhi$tiles[[1]]$projection)
+
+y.vec <- unlist(cpcb.sens[,-1]) # stack, grouped by location
+logy.vec <- log(y.vec) # log response, NAs in correct places
+logy.vec.full <- c(logy.vec,rep(NA,nS.mesh*nT)) # add NAs for extra locations
+
+obsind.full <- as.integer(!is.na(logy.vec.full)) # 1=available, 0=missing value
+
+
+distmat.full <- matrix(NA_real_,nS.full,nS.full) # Euclidean dist
+for (i in 1:nS.full){
+  distmat.full[i,i] <- 0
+  j <- 1
+  while (j<i){
+    distmat.full[i,j] <- sqrt((coord.full[i,1]-coord.full[j,1])^2 + 
+                                + (coord.full[i,2]-coord.full[j,2])^2)
+    distmat.full[j,i] <- distmat.full[i,j] # symmetry
+    j <- j+1
+  }
+}
+distmat.full[1:5,1:5] # in km because utm coord in km from proj
+
+
+### create zmat, correct dim by replicating covariate
+str(cpcb.weat) # only 2881 rows, time only
+zmat <- as.matrix(cpcb.weat[,-1])
+
+zmat <- rep(1,nS.full)%x%zmat # replicate for 54 locations
+dim(zmat) # ok n.full=169'979
+
+# note: no intercept in zmat => intercept in seasonal component Bmat
+
+
+### fit ML v0.5, intercept only for now, sampled+extra locations
+datalist.full <- list()
+datalist.full$log_y <- logy.vec.full
+datalist.full$obsind <- obsind.full
+datalist.full$zmat <- zmat
+datalist.full$Bmat <- Bmat 
+datalist.full$kn <- kn
+datalist.full$distmat <- distmat.full
+datalist.full$interceptonly <- 0L # covariates + seasonality
+
+parlist.full <- list()
+parlist.full$beta <- c(0,0,0) # dim = p = dim(zmat)[2]
+parlist.full$alpha <- c(0.1,0.1,0,-0.1) # spline coeff, dim = J-1 = dim(Bmat)[2]-1
+parlist.full$log_sigmaepsilon <- 0 # log(sigmaepsilon)
+parlist.full$t_phi <- 1 # log((1+phi)/(1-phi)) # (exp(x)-1)/(exp(x)+1)
+parlist.full$log_gamma <- 0 # log(gamma)
+parlist.full$log_sigmadelta <- 0 # log(sigmadelta)
+parlist.full$X <- rep(0,n.full) # logy.vec
+
+system.time(obj.full <- MakeADFun(data=datalist.full,parameters=parlist.full,
+                                  random=c('X'),DLL="TGHM",silent=T))
+# ^ 21s for nS.mesh=31 with interceptonly=0
+
+system.time(print(obj.full$fn()))
+# ^ 204s for nS.mesh=31 with interceptonly=0
+
+system.time(print(obj.full$gr()))
+# ^ 20s for nS.mesh=31 with interceptonly=0
+
+
+system.time(opt.full <- nlminb(start=obj.full$par,obj=obj.full$fn,gr=obj.full$gr,
+                               control=list(eval.max=500,iter.max=500)))
+# ^ 2954s nS.full=59, nT=2881, interceptonly=0
+opt.full$mess # ok
+
+system.time(rep.full <- sdreport(obj.full))
+# ^ 313s nS.full=59, nT=2881, with interceptonly=0
+
+summ.rep.full <- summary(rep.full)
+summ.rep.full[(11+n.full+1):dim(summ.rep.full)[1],]
+# ^ se available!
+
+# save.image('cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData')
+# load('cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData')
+
+
+### compute PM2.5 predictions, interceptonly model
+X.pred.full <- t(matrix(summ.rep.full[dimnames(summ.rep.full)[[1]]=='X',1],
+                        nT,nS.full))
+# X.se.full <- t(matrix(summ.rep.full[dimnames(summ.rep.full)[[1]]=='X',2],
+#                       nT,nS.full))
+# ^ original layout of data: one row per location, time points as cols
+range(X.pred.full)
+# ^ roughly [-7.8,+3] <= much wider than on Kaiterra data
+
+detfx <- as.numeric(zmat%*%summ.rep.full[1:3,1])
+season <- Bmat%*%summ.rep.full[(14+n.full+1):(19+n.full+1),1]
+
+fixed.fx.full <- t(matrix(detfx+season,nT,nS.full)) # covariates + seasonality
+# ^ fixed effects, constant through time
+range(fixed.fx.full) # roughly [4.1,4.5], narrower than [3.86,4.52] on kt
+
+pred.pm.full <- exp(fixed.fx.full+X.pred.full)
+range(y.vec,na.rm=T)
+range(pred.pm.full) # fairly close but much smaller max => spike smoothed out?
+# ^ identical range, overfit? also sigma-measurement error arbitrarily close to
+#   zero, so X basically matches observed y....
+
+
+### plot PM2.5 predictions on top of Delhi map
+lbub <- c(0,1408) # bounds for color gradient, scale of pred.pm.full
+mai.def <- c(1.02, 0.82, 0.82, 0.42)
+mar.def <- c(5.1, 4.1, 4.1, 2.1)
+alpha.colgrad <- 0.7
+legend_image <- as.raster(matrix(colgreenred(100,alpha=alpha.colgrad)[100:1],
+                                 ncol=1))
+
+loc.lonlat <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+loc.osm <- spTransform(loc.lonlat,map.delhi$tiles[[1]]$projection) # re-project
+
+ts2print <- format(cpcb.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+
+# pdf('Kaiterra_11May-10June_STHMio_MapPredPM25.pdf',width=8,height=8,onefile=T)
+# for (j in 1:nT){
+  # layout(matrix(1:2,ncol=2),width=c(8,1),height=c(1,1)) # split plot region
+  # par(mai=rep(1,4),mar=c(6,5,4,2))
+  # plot(map.delhi,removeMargin=F)
+  # intsurf <- interp(x=coord.full.osm@coords[,1],y=coord.full.osm@coords[,2],
+  #                   z=pred.pm.full[,j],nx=200,ny=200,linear=T)
+  # image(intsurf$x,intsurf$y,intsurf$z,col=colgreenred(100,alpha=alpha.colgrad),
+  #       zlim=lbub,add=T)
+  # points(loc.osm,pch=19,col='blue')
+  # axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+  # axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+  # title(main=paste0("CPCB/DPCC/IMD 11 May - 10 June, cs, predicted PM2.5"),
+  #       xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+  # title(sub=ts2print[j],cex.sub=0.8,adj=1) # time stamp at bottomright
+  # # legend as color bar
+  # par(mar=c(5.1,1,4.1,1))
+  # plot(c(0,2),c(0,1),type='n',axes=F,xlab ='',ylab='')
+  # rasterImage(legend_image,xleft=0,ybottom=0,xright=2,ytop=1,angle=0)
+  # text(x=1,y=seq(0.02,0.98,l=5),adj=0.5,cex=0.7,
+  #      labels=round(seq(lbub[1],lbub[2],l=5),2))
+  # par(mai=mai.def,mar=mar.def) # back to default margins
+  # layout(1) # default layout
+# }
+# dev.off()
+# # ^ file way too heavy!
+
+
+### separate png for video
+lbub <- c(0,1408) # bounds for color gradient, scale of pred.pm.full
+mai.def <- c(1.02, 0.82, 0.82, 0.42)
+mar.def <- c(5.1, 4.1, 4.1, 2.1)
+alpha.colgrad <- 0.7
+legend_image <- as.raster(matrix(colgreenred(100,alpha=alpha.colgrad)[100:1],
+                                 ncol=1))
+
+for (j in 1:nT){
+  png(paste0('Outputs/VideoSeparatePNG/CPCB_11May-10June_STHMcs_MapPredPM25_',
+             sprintf(j,fmt='%04d'),'.png'),
+      width=7,height=7,res=200,units='in')
+  layout(matrix(1:2,ncol=2),width=c(8,1),height=c(1,1)) # split plot region
+  # par(mar=c(5.1,4.1,4.1,1))
+  par(mai=rep(1,4),mar=c(6,5,4,2))
+  plot(map.delhi,removeMargin=F)
+  intsurf <- interp(x=coord.full.osm@coords[,1],y=coord.full.osm@coords[,2],
+                    z=pred.pm.full[,j],nx=200,ny=200,linear=T)
+  image(intsurf$x,intsurf$y,intsurf$z,col=colgreenred(100,alpha=alpha.colgrad),
+        zlim=lbub,add=T)
+  points(loc.osm,pch=19,col='blue')
+  axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+  axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+  title(main=paste0("CPCB/DPCC/IMD 11 May - 10 June, covariates+seasonality, predicted PM2.5"),
+        xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+  title(sub=ts2print[j],cex.sub=0.8,adj=1) # time stamp at bottomright
+  # legend as color bar
+  par(mar=c(5.1,1,4.1,1))
+  plot(c(0,2),c(0,1),type='n',axes=F,xlab ='',ylab='')
+  rasterImage(legend_image,xleft=0,ybottom=0,xright=2,ytop=1,angle=0)
+  text(x=1,y=seq(0.02,0.98,l=5),adj=0.5,cex=0.7,
+       labels=round(seq(lbub[1],lbub[2],l=5),2))
+  par(mai=mai.def,mar=mar.def) # back to default margins
+  layout(1) # default layout
+  dev.off()
+}
+
+# ffmpeg -framerate 24 -i CPCB_11May-10June_STHMcs_MapPredPM25_%04d.png
+#   ../CPCB_11May-10June_STHMcs_MapPredPM25.mp4
+
+# 24 fps => 1 movie second = 6 real time hours
+
+
+### plot of daily seasonal periodic effect
+alphavec <- summ.rep.full[(14+n.full+1):(19+n.full+1),1] # dim J=6
+
+kn <- c(0.00,0.25,0.50,0.75,1.00)
+
+xgrid <- seq(0,1,0.01)
+
+sb.grid <- bs(xgrid,degree=2,knots=kn,Boundary.knots=c(0,1))
+sb.grid <- sb.grid[,-dim(sb.grid)[2]] # extra col because I specify all knots
+sb.grid.rep <- rep(1,3)%x%sb.grid # repeat for visuals
+
+dailyseason <- as.numeric(sb.grid%*%alphavec)
+dailyseason.rep <- as.numeric(sb.grid.rep%*%alphavec)
+
+pdf('CPCB_11May-10June_SeasonalEffect.pdf',width=8,height=7)
+plot(c(seq(-1,0,0.01),seq(0,1,0.01),seq(1,2,0.01)),xlim=c(-0.3,1.3),
+     dailyseason.rep,type='l',xaxt='n',xlab='Time (hours)',col='grey',lty=2,
+     ylab='Predicted log(PM2.5) concentration',
+     main='CPCB/DPCC/IMD B-splines estimated daily seasonal effect')
+abline(h=seq(3.9,4.5,0.1),lty=3,col='lightgrey')
+abline(v=seq(-0.25,1.25,0.25),lty=3,col='lightgrey')
+lines(xgrid,dailyseason)
+axis(side=1,at=seq(-0.25,1.25,0.25),
+     labels=c('18:00','00:00','06:00','12:00','18:00','00:00','06:00'))
+dev.off()
+
+
+
+
+
+
+
+
+#//////////////////////////////////////////////////////////////////////
+#### 2018-11-11 CPCB csv 11May-10June, extra loc inlamesh save csv ####
+#//////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(INLA) # for mesh
+library(rgdal) # for lat/lon conversion to utm
+library(OpenStreetMap) # for map downloading and plotting
+
+cpcb.loc <- read.table('CPCB_11May-10June_loc.csv',sep=',',header=T)
+cpcb.sens <- read.table('CPCB_11May-10June_pm25.csv',sep=',',header=T)
+cpcb.weat <- read.table('Kaiterra_11May-10June_weather.csv',sep=',',header=T)
+# ^ same weather data since for all Delhi at same ts
+
+str(cpcb.loc) # 28 locations
+
+cpcb.sens$ts <- as.POSIXct(strptime(cpcb.sens$ts,
+                                    format='%Y-%m-%d %H:%M',
+                                    tz="Asia/Kolkata")) # date/time ISO standard
+# cpcb.sens$ts <- format(cpcb.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(cpcb.sens)
+
+cpcb.weat$ts <- as.POSIXct(strptime(cpcb.weat$ts,
+                                    format='%Y-%m-%d %H:%M',
+                                    tz="Asia/Kolkata")) # date/time ISO standard
+# cpcb.sens$ts <- format(cpcb.sens$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat, no seconds
+str(cpcb.weat)
+# ^ hourly data only, no spatial info, for whole Delhi
+
+nS <- dim(cpcb.loc)[1] # 28 locations
+nT <- dim(cpcb.sens)[1] # 2881 time points
+n <- nS*nT # 80'668, not accounting for NAs
+
+sum(is.na(cpcb.sens))/(nS*nT) # 12% NAs, not bad
+
+
+
+### use INLA to create grid of locations by Delaunay triangulation
+coord <- cpcb.loc[,c('utmx','utmy')]
+apply(coord,2,range) # determine borders of domain
+
+mar.mesh <- 1.0 # beyond range of obs locations
+coord.border <- data.frame('utmx'=c(min(coord$utmx)-mar.mesh,
+                                    rep(max(coord$utmx)+mar.mesh,2),
+                                    rep(min(coord$utmx)-mar.mesh,2)),
+                           'utmy'=c(rep(min(coord$utmy)-mar.mesh,2),
+                                    rep(max(coord$utmy)+mar.mesh,2),
+                                    min(coord$utmy)-mar.mesh))
+# ^ 4 corners, last=first to close domain, mar.mesh beyond observed range
+
+system.time(inlamesh <- inla.mesh.2d(loc=coord, # coordinates in UTM
+                                     loc.domain=coord.border,
+                                     offset=1, #                  | offset=1
+                                     max.edge=10,#                | max.edge=5
+                                     min.angle=5,  #              | min.angle=20
+                                     # max.n=1000, # overrides max.edge
+                                     cutoff=0,
+                                     plot.delay=NULL))
+inlamesh$n
+# ^ with nT=2881 and nS=18, 123 is too much for my MBP RAM- and CPU-wise
+
+plot(inlamesh)
+lines(coord.border,lwd=3,col='blue')
+points(coord$utmx,coord$utmy,pch=20,cex=1.5,col=2)
+
+plot(inlamesh$loc[,1],inlamesh$loc[,2],pch=8,cex=1,col='deeppink')
+lines(coord.border,lwd=3,col='blue') # well-spread?
+
+coord.mesh <- data.frame('utmx'=inlamesh$loc[,1],'utmy'=inlamesh$loc[,2])
+# ^ to be used for predictions and mapping
+
+which(coord.mesh[,1]%in%coord[,1])
+which(coord.mesh[,2]%in%coord[,2])
+# ^ original points are included in the mesh locations, arbitrary position
+
+coord.mesh <- coord.mesh[-which(coord.mesh[,1]%in%coord[,1]),]
+str(coord.mesh)
+points(coord.mesh[,1],coord.mesh[,2],pch=8,cex=1,col='limegreen')
+# ^ 105 extra locations too much for my MBP
+
+nS.mesh <- dim(coord.mesh)[1] # 105 extra locations
+nS.full <- nS+nS.mesh # 59 total nb locations
+n.full <- nT*nS.full # 169'979, incl pred locations and not accounting for NAs
+
+coord.df <- data.frame(rbind(coord,coord.mesh))
+coord.df$observed <- c(rep(1L,nS),rep(0L,dim(coord.mesh)[1]))
+
+write.table(coord.df,file='CPCB_11May-10June_coord.csv',sep=',',
+            row.names=F,col.names=T)
+
+
+
+
+
+
+#//////////////////////////////////////////////////////////////////////////////
+#### 2018-11-11 CPCB updated data Mar-Sep 2018 csv from Shiva, save tw csv ####
+#//////////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+pafdata <- '/Delhi Pollution/07_Data_Secondary/CPCB_Oct2018'
+
+
+### import data from Shiva's csv, reformat timestamp, check nb sensors/locations
+cpcb.full <- read.table(paste0(paf2drop,pafdata,'/govdata_15min_all.csv'),
+                        sep=',',header=T)
+str(cpcb.full) # huge
+
+cpcb.full$ts <- as.POSIXct(strptime(cpcb.full$timestamp_round,
+                                    format='%Y-%m-%d %H:%M:%S',
+                                    tz="Asia/Kolkata")) # date/time ISO standard
+# kt.full$ts <- format(kt.full$ts,"%Y-%m-%d %H:%M",usetz=T) # reformat no seconds
+# ^ convert to correct class with IST time zone
+range(cpcb.full$ts) # overview of full time period = Mar 1 - Oct 31
+
+names.loc <- as.character(unique(cpcb.full$location))
+nb.loc <- length(names.loc) # 33 locations overall
+
+
+### visualize data availability with tw
+tw.bd <- as.POSIXct(c('2018-05-11 00:00:00',
+                      '2018-06-10 00:00:00'),tz="Asia/Kolkata")
+
+tw.vizbd <- range(cpcb.full$ts)
+
+# by location (= unique field_egg_id)
+plot(x=tw.vizbd,y=c(1,nb.loc),type='n',
+     xlab='Total time period',ylab='Location',yaxt='n',
+     main='CPCB/DPCC/IMD Mar-Oct 2018, up and down time by location')
+axis(side=2,at=1:nb.loc,labels=names.loc,las=1)
+for (j in 1:nb.loc){
+  ind <- cpcb.full$location==names.loc[j]
+  ind.na <- is.na(cpcb.full$pm25[ind])
+  arrows(x0=min(cpcb.full$ts[ind]),x1=max(cpcb.full$ts[ind]),y0=j,y1=j,
+         col='grey',angle=90,code=3,length=0.05,lty=1)
+  points(x=cpcb.full$ts[ind][!ind.na],y=rep(j,sum(!ind.na)),pch=19,cex=0.1)
+}
+abline(v=tw.bd,lty=2)
+# ^ directly exclude five locations
+
+discarded.loc <- c("Sri Aurobindo Marg, Delhi - DPCC",
+                   "Pusa, Delhi - DPCC",
+                   "Mundaka, Delhi - DPCC",
+                   "East Arjun Nagar, Delhi - CPCB",
+                   "Burari Crossing, New Delhi - IMD")
+kept.loc <- names.loc[!names.loc%in%discarded.loc] # 28 left
+
+
+
+### create df lat/lon and map both kept and discarded locations
+cpcb.loc <- data.frame('loc'=names.loc,stringsAsFactors=F)
+table(round(cpcb.full$longitude,4)) # looks ok
+table(round(cpcb.full$latitude,4)) # looks ok
+
+for (j in 1:nb.loc){
+  cpcb.loc$lon[j] <- cpcb.full$longitude[cpcb.full$location==names.loc[j]][1]
+  cpcb.loc$lat[j] <- cpcb.full$latitude[cpcb.full$location==names.loc[j]][1]
+}
+
+
+library(sp)
+library(rgdal)
+library(OpenStreetMap)
+
+range(cpcb.full$latitude)
+range(cpcb.full$longitude)
+corners.delhi <- list('topleft'=c(28.47, 77.03), # lat/lon
+                      'botright'=c(28.76, 77.32)) # lat/lon
+map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
+                     zoom=NULL,type='stamen-toner') # type='osm'
+
+df.latlon <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.latlon.sp <- spTransform(df.latlon,osm())
+
+plot(map.delhi,removeMargin=F)
+points(df.latlon.sp,pch=19,col=ifelse(names.loc%in%discarded.loc,'red','blue'))
+text(names.loc,x=df.latlon.sp@coords[1:j,1],y=df.latlon.sp@coords[1:j,2],
+     col=ifelse(names.loc%in%discarded.loc,'red','blue'),cex=0.5
+     # ,pos=c(4,2,3,2,4,4,2,4,4,1,1,2,1,4,4,4,1,4,4,2,2,4)
+)
+axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+title(main="CPCB/DPCC/IMD monitors Mar-Oct 2018, tw 2018-05-11 - 2018-06-10",
+      xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+legend('topleft',c('Discarded','Kept'),pch=c(19,19),bg='white',
+       col=c('red','blue'))
+# ^ ok, discarded monitors do not affect convex hull much, all quite compact
+
+
+### 28 locations left: extract tw from cpcb.full, save data to txt (no RData)
+cpcb <- subset(cpcb.full,subset=(cpcb.full$ts >= tw.bd[1] &
+                                   cpcb.full$ts <= tw.bd[2] &
+                                   cpcb.full$location%in%kept.loc))
+cpcb <- cpcb[,c('location','ts','pm25')]
+str(cpcb) # 2881*28 = 80668 obs
+
+range(cpcb$ts)
+tw.bd # identical by construction
+
+tw <- seq(from=tw.bd[1],to=tw.bd[2],by='15 min') # common time stamp
+tw <- format(tw,"%Y-%m-%d %H:%M",usetz=T) # reformat without seconds
+length(tw) # 2881 values incl bounds
+str(tw) # correct format, no seconds
+
+cpcb.shortloc <- c("Anand_Vihar","Ashok_Vihar","Aya_Nagar","CRRI_Mathura_Road",
+                   "DTU","Dr._Karni_Singh_Shooting_Range","Dwarka-Sector_8",
+                   "IGI_Airport_(T3)","IHBAS,_Dilshad_Garden","ITO",
+                   "Jahangirpuri","Jawaharlal_Nehru_Stadium","Lodhi_Road",
+                   "Major_Dhyan_Chand_National_Stadium","Mandir_Marg",
+                   "NSIT_Dwarka","Nehru_Nagar","Okhla_Phase-2","Patparganj",
+                   "Punjabi_Bagh","Pusa","R_K_Puram","Rohini","Shadipur",
+                   "Sirifort","Sonia_Vihar","Vivek_Vihar","Wazirpur")
+
+cpcb.sens <- data.frame('ts'=tw)
+for (j in 1:length(kept.loc)){
+  ind <- cpcb$location==kept.loc[j]
+  tmp <- cpcb$pm25[ind]
+  # sum(tmp<=0,na.rm=T)
+  tmp[which(tmp<=0)] <- NA # replace non-pos by NA, safest
+  cpcb.sens[[paste0('pm25_',cpcb.shortloc[j])]] <- tmp
+}
+str(cpcb.sens,1)
+head(cpcb.sens)
+tail(cpcb.sens) # looks good
+
+write.table(cpcb.sens,file='CPCB_11May-10June_pm25.csv',sep=',',
+            row.names=F,col.names=T)
+# ^ csv file of 2881 obs pm25, 29 cols:
+#   - col 1: character string for time stamp
+#   - col 2-29: numerical for pm25, one for each location (short names)
+
+
+### create df of 18 locations with lat/lon and UTM coord
+df.latlon <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+proj.string <- "+proj=utm +zone=43 +ellps=WGS84 +north +units=km"
+# ^ Delhi = UTM zone 43R
+coord.utm <- spTransform(df.latlon, CRS(proj.string)) # re-project
+cpcb.loc$utmx <- coord.utm@coords[,1]
+cpcb.loc$utmy <- coord.utm@coords[,2]
+
+str(cpcb.loc)
+
+cpcb.loc <- cpcb.loc[names.loc%in%kept.loc,] # keep only kept loc
+
+cpcb.loc$loc <- cpcb.shortloc
+str(cpcb.loc) # much cleaner
+
+write.table(cpcb.loc,file='CPCB_11May-10June_loc.csv',sep=',',
+            row.names=F,col.names=T)
+# ^ csv file for 28 rows = 28 locations:
+#   - col 1 = character string for location (= short name)
+#   - col 2 = numerical for longitude
+#   - col 3 = numerical for latitude
+#   - col 4 = numerical for projected UTM X
+#   - col 5 = numerical for projected UTM Y
+
+
+
+
+
+
+
+
+
+#////////////////////////////////////////////////////////////////////////////////
+#### 2018-11-11 Kaiterra csv 11May-10June, v0.5 cs, leave-one-out CV spatial ####
+#////////////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(TMB)
+
+### create and load function from cpp template
+# compile("TGHM.cpp")
+dyn.load(dynlib("TGHM"))
+
+### load envir from whole fit to Kaiterra 11May-10June data
+load('kt_11May-10June_TempFit_cs_nS.mesh.36.RData')
+
+
+### Spatial pred, loop over all sensors, record pred resid (raw diff) for each as a ts
+res.spcv.raw <- matrix(NA_real_,nS,nT) # raw resid for spatial leave-one-out CV
+res.spcv.rel <- res.spcv.raw # divide by obs and *100, relative but no abs val
+
+wallclock <- proc.time()[3]
+for (j in 1:nS){
+  excl.sens <- j # out of nS
+  which.excl <- (1:nT)+(excl.sens-1)*nT # space=outer loop, time=inner loop
+  # ^ excluded values in stacked vector
+  # ^ valid for original data also, because extra loc stacked after
+  
+  logy.vec.full.cv <- logy.vec.full
+  logy.vec.full.cv[which.excl] <- NA # as if missing values
+  obsind.full.cv <- as.integer(!is.na(logy.vec.full.cv))
+  # ^ 1=available, 0=missing value
+  
+  logy.vec.cv <- logy.vec
+  logy.vec.cv[which.excl] <- NA # as if missing values
+  
+  
+  # ML fit to sub-sample
+  datalist.full.cv <- list()
+  datalist.full.cv$log_y <- logy.vec.full.cv
+  datalist.full.cv$obsind <- obsind.full.cv
+  datalist.full.cv$zmat <- zmat
+  datalist.full.cv$Bmat <- Bmat 
+  datalist.full.cv$kn <- kn
+  datalist.full.cv$distmat <- distmat.full
+  datalist.full.cv$interceptonly <- 0L # covariates + seasonality
+  
+  obj.full.cv <- MakeADFun(data=datalist.full.cv,parameters=parlist.full,
+                           random=c('X'),DLL="TGHM",silent=T)
+  # ^ 18s for nS.mesh=36 with interceptonly=0 on full data
+  
+  opt.full.cv <- nlminb(start=obj.full.cv$par,obj=obj.full.cv$fn,gr=obj.full.cv$gr,
+                        control=list(eval.max=500,iter.max=500))
+  # ^ 1292s nS.full=54, nT=2881, interceptonly=0 on full data
+  
+  rep.full.cv <- sdreport(obj.full.cv)
+  # ^ 237s nS.full=54, nT=2881, with interceptonly=0 on full data
+  
+  summ.rep.full.cv <- summary(rep.full.cv)
+  
+  # prediction error of excl.sens
+  X.pred.full.cv <- t(matrix(summ.rep.full[dimnames(summ.rep.full.cv)[[1]]=='X',1],
+                             nT,nS.full))
+  
+  detfx.cv <- as.numeric(zmat%*%summ.rep.full.cv[1:3,1])
+  season.cv <- Bmat%*%summ.rep.full.cv[(14+n.full+1):(19+n.full+1),1]
+  fixed.fx.full.cv <- t(matrix(detfx.cv+season.cv,nT,nS.full)) # cs
+  pred.pm.full.cv <- exp(fixed.fx.full.cv+X.pred.full.cv)
+  
+  # plot(pred.pm.full.cv[which.excl],y.vec[which.excl],xlim=c(0,600),ylim=c(0,600))
+  # abline(0,1,col='red')
+  
+  res.spcv.raw[j,] <- y.vec[which.excl]-pred.pm.full.cv[excl.sens,] # ts, length=nT
+  res.spcv.rel[j,] <- 100*(y.vec[which.excl]-pred.pm.full.cv[excl.sens,])/
+    y.vec[which.excl]
+  message('loc ',j,' out of ',nS)
+}
+elapsed.time <- proc.time()[3]-wallclock
+print(elapsed.time)
+# ^ 28030s = 7h47 for nS.mesh=36, leave-one-out
+
+# par(mfrow=c(2,1))
+# for (j in 1:nS){
+#   plot(kt.sens[,1],res.spcv.raw[j,],type='l',
+#        main=paste0('Spatial pred raw resid, sensor ',names.sens[j]))
+#   plot(kt.sens[,1],res.spcv.rel[j,],type='l',
+#        main=paste0('Spatial pred rel resid, sensor ',names.sens[j]))
+# }
+# par(mfrow=c(1,1))
+
+# save.image('kt_11May-10June_cs_nS.mesh.36_SptialLOOCV.RData')
+
+
+
+
+
+
+
+
+
+
+
+#//////////////////////////////////////////////////////////////////////////
+#### 2018-11-11 Kaiterra csv 11May-10June, v0.5 cs, 9-fold CV temporal ####
+#//////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(TMB)
+
+### create and load function from cpp template
+# compile("TGHM.cpp")
+dyn.load(dynlib("TGHM"))
+
+### load envir from whole fit to Kaiterra 11May-10June data
+load('kt_11May-10June_TempFit_cs_nS.mesh.36.RData')
+
+
+### Temporal pred: 9-fold CV, predict blocks of 320 obs (last=321) for all loc
+nT/9 # 9-fold CV: 8 first blocks with 320 obs and last with 321 obs
+8*320 + 321 # ok
+
+bs <- c(rep(320,8),321) # block sizes, sum(bs)=nT
+
+mape.temp.abs <- double(9) # 9 folds, absolute error
+mape.temp.rel <- mape.temp.abs # relative error
+
+wallclock <- proc.time()[3]
+for (j in 1:9){ # loop over 9 folds
+  btw <- (1:bs[j])+(j-1)*bs[1] # block time window, last one has diff length
+
+  which.excl <- as.numeric(sapply((1:nS-1)*nT,function(x){x+btw}))
+  # ^ excluded values in full stacked vector, btw for each loc
+  # ^ valid for original data also, because extra loc stacked after
+  
+  logy.vec.full.cv <- logy.vec.full
+  logy.vec.full.cv[which.excl] <- NA # as if missing values
+  
+  obsind.full.cv <- as.integer(!is.na(logy.vec.full.cv))
+  # ^ 1=available, 0=missing value
+  # plot(t(matrix(obsind.full.cv,nT,nS))[2,]) # check zeros in correct places
+  
+  logy.vec.cv <- logy.vec
+  logy.vec.cv[which.excl] <- NA # as if missing values
+  
+
+  # ML fit to sub-sample
+  datalist.full.cv <- list()
+  datalist.full.cv$log_y <- logy.vec.full.cv
+  datalist.full.cv$obsind <- obsind.full.cv
+  datalist.full.cv$zmat <- zmat
+  datalist.full.cv$Bmat <- Bmat 
+  datalist.full.cv$kn <- kn
+  datalist.full.cv$distmat <- distmat.full
+  datalist.full.cv$interceptonly <- 0L # covariates + seasonality
+  
+  obj.full.cv <- MakeADFun(data=datalist.full.cv,parameters=parlist.full,
+                           random=c('X'),DLL="TGHM",silent=T)
+  # ^ 18s for nS.mesh=36 with interceptonly=0 on full data
+  
+  opt.full.cv <- nlminb(start=obj.full.cv$par,obj=obj.full.cv$fn,gr=obj.full.cv$gr,
+                        control=list(eval.max=500,iter.max=500))
+  # ^ 1292s nS.full=54, nT=2881, interceptonly=0 on full data
+  
+  rep.full.cv <- sdreport(obj.full.cv)
+  # ^ 237s nS.full=54, nT=2881, with interceptonly=0 on full data
+  
+  summ.rep.full.cv <- summary(rep.full.cv)
+  
+  # prediction error of excl.sens
+  X.pred.full.cv <- t(matrix(summ.rep.full[dimnames(summ.rep.full.cv)[[1]]=='X',1],
+                             nT,nS.full))
+  
+  detfx.cv <- as.numeric(zmat%*%summ.rep.full.cv[1:3,1])
+  season.cv <- Bmat%*%summ.rep.full.cv[(14+n.full+1):(19+n.full+1),1]
+  fixed.fx.full.cv <- t(matrix(detfx.cv+season.cv,nT,nS.full)) # cs
+  pred.pm.full.cv <- exp(fixed.fx.full.cv+X.pred.full.cv)
+  
+  # plot(pred.pm.full.cv[which.excl],y.vec[which.excl],xlim=c(0,600),ylim=c(0,600))
+  # abline(0,1,col='red')
+  mape.temp.abs[j] <- mean(abs(y.vec[which.excl]-pred.pm.full.cv[which.excl]),na.rm=T)
+  mape.temp.rel[j] <- mean(abs(y.vec[which.excl]-pred.pm.full.cv[which.excl])/
+                             y.vec[which.excl],na.rm=T)
+  message('fold ',j,' out of 9')
+}
+elapsed.time <- proc.time()[3]-wallclock
+print(elapsed.time)
+# ^ 14514s = 4h for nS.mesh=36, 9-fold
+
+mape.temp.abs
+mean(mape.temp.abs) # off by 37.65 mu g/m3 on average
+
+mape.temp.rel
+mean(mape.temp.rel) # 62% relative error on average...
+# ^ improved over 70%-72% on PP2 with only intercept as det fx, although not
+#   same data so not really comparable.
+
+# save.image('kt_11May-10June_cs_nS.mesh.36_Temporal9foldCV.RData')
+
+
+
 
 
 
@@ -153,8 +961,8 @@ for (i in 1:nS.full){
 }
 distmat.full[1:5,1:5] # in km because utm coord in km from proj
 
-### create zmat, correct dim by replicating covariate
 
+### create zmat, correct dim by replicating covariate
 str(kt.weat) # only 2881 rows, time only
 zmat <- as.matrix(kt.weat[,-1])
 
