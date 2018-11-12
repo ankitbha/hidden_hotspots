@@ -24,10 +24,8 @@ from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
 
-def plot_preview(tag, epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5, weather=None):
+def plot_preview(imname, tag, epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5, weather=None):
     (start, end, locations) = seginfo
-    # imgname = 'preview/%s_pred_%d_epoch_%d.png' % (tag, target, epoch)
-    currname = 'images/plots/%s_pred_%d_best.png' % (tag, target)
 
     tf = time.mktime(datetime.strptime(end, '%m/%d/%Y').timetuple())
     t0 = tf - interval * 60 * len(predictions)
@@ -78,15 +76,15 @@ def plot_preview(tag, epoch, seginfo, target, segments, predictions, loss, histl
     plt.xticks([0, len(predictions)-1], [startstr, dstr])
     # plt.savefig(imgname, bbox_inches='tight')
 
-    plt.savefig(currname, bbox_inches='tight')
+    plt.savefig(imname, bbox_inches='tight')
     plt.close()
 
-    for sii, seg in enumerate(segments):
-        plt.figure(figsize=(14, 4))
-        plt.title(locations[sii])
-        plt.plot(seg*norm)
-        plt.savefig('debug/%s.jpg' % locations[sii], bbox_inches='tight')
-        plt.close()
+    # for sii, seg in enumerate(segments):
+    #     plt.figure(figsize=(14, 4))
+    #     plt.title(locations[sii])
+    #     plt.plot(seg*norm)
+    #     plt.savefig('debug/%s.jpg' % locations[sii], bbox_inches='tight')
+    #     plt.close()
 
     return avgloss
 
@@ -262,7 +260,9 @@ if __name__ == '__main__':
 
         if series_loss < prevloss:
             prevloss = series_loss
+            imname = 'images/plots/%s_pred_%d_best.png' % (tag, args.target)
             mse_avg = plot_preview(
+                imname,
                 tag,
                 eii,
                 (start_date, end_date, location_names),
