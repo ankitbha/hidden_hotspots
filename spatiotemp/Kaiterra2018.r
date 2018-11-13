@@ -1,3 +1,376 @@
+#////////////////////////////////////////////////////////////////////////
+#### 2018-11-13 Fig: Kaiterra and CPCB pred 3x2 static maps in paper ####
+#////////////////////////////////////////////////////////////////////////
+
+# here!!!
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(TMB)
+
+### load envir from whole fit to Kaiterra 11May-10June data
+load('cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData')
+load('kt_11May-10June_TempFit_cs_nS.mesh.36.RData')
+
+
+### map both cpcb and kt
+range(kt.loc$lat)
+range(kt.loc$lon)
+
+range(cpcb.loc$lat)
+range(cpcb.loc$lon)
+
+corners.delhi <- list('topleft'=c(28.41, 77.01), # lat/lon
+                      'botright'=c(28.76, 77.39)) # lat/lon
+map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
+                     zoom=NULL,type='stamen-toner') # type='osm'
+
+df.kt.latlon <- SpatialPoints(kt.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.kt.latlon.sp <- spTransform(df.kt.latlon,osm())
+df.cpcb.latlon <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.cpcb.latlon.sp <- spTransform(df.cpcb.latlon,osm())
+
+### map pred
+# pdf('fig_KaiterraCPCBlocations.pdf',width=8,height=20)
+plot(map.delhi,removeMargin=F)
+points(df.kt.latlon.sp,pch=19,col='red')
+points(df.cpcb.latlon.sp,pch=19,col='blue')
+axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+title(main="Sensing network and CPCB/DPCC/IMD monitors",
+      xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+legend('topright',c('Our sensors','CPCB/DPCC/IMD'),col=c('red','blue'),
+       pch=c(19,19),bg='white')
+# dev.off()
+
+
+
+
+
+
+#////////////////////////////////////////////////////////////////////
+#### 2018-11-12 Tab: MAE/MAPE Kaiterra and CPCB csv 11May-10June ####
+#////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+
+### temporal kt MAE and MAPE for table
+load('kt_11May-10June_cs_nS.mesh.36_Temporal9foldCV.RData')
+
+# mape.temp.abs = mean(abs(y.vec[which.excl]-pred.pm.full.cv[which.excl]),na.rm=T)
+# mape.temp.rel = mean(abs(y.vec[which.excl]-pred.pm.full.cv[which.excl])/
+#                            y.vec[which.excl],na.rm=T)
+
+mape.temp.abs
+mean(mape.temp.abs) # off by 37.66 mu g/m3 on average
+
+mape.temp.rel
+mean(mape.temp.rel)*100 # 62.31% relative error on average...
+
+### spatial kt MAE and MAPE for table
+load('kt_11May-10June_cs_nS.mesh.36_SpatialLOOCV.RData')
+
+# res.spcv.raw = y.vec[which.excl]-pred.pm.full.cv[excl.sens,]
+# res.spcv.rel = 100*(y.vec[which.excl]-pred.pm.full.cv[excl.sens,])/y.vec[which.excl]
+
+str(res.spcv.raw) # kept whole time series in case we want to plot
+str(res.spcv.rel) # kept whole time series in case we want to plot
+
+apply(res.spcv.raw,1,FUN=function(x){mean(abs(x),na.rm=T)}) # per location
+apply(res.spcv.rel,1,FUN=function(x){mean(abs(x),na.rm=T)}) # per location
+
+mean(abs(res.spcv.raw),na.rm=T) # MAE
+mean(abs(res.spcv.rel),na.rm=T) # MAPE
+# ^ unbelievably small but cannot find the error...
+
+
+### temporal cpcb MAE and MAPE for table
+load('cpcb_11May-10June_cs_nS.mesh.31_Temporal9foldCV.RData')
+
+mape.temp.abs
+mean(mape.temp.abs) # off by 49.67 mu g/m3 on average
+
+mape.temp.rel
+mean(mape.temp.rel)*100 # 88.43% relative error on average...
+
+
+### spatial cpcb MAE and MAPE for table
+load('cpcb_11May-10June_cs_nS.mesh.31_SpatialLOOCV.RData')
+
+str(res.spcv.raw) # kept whole time series in case we want to plot
+str(res.spcv.rel) # kept whole time series in case we want to plot
+
+apply(res.spcv.raw,1,FUN=function(x){mean(abs(x),na.rm=T)}) # per location
+apply(res.spcv.rel,1,FUN=function(x){mean(abs(x),na.rm=T)}) # per location
+
+mean(abs(res.spcv.raw),na.rm=T) # MAE
+mean(abs(res.spcv.rel),na.rm=T) # MAPE
+# ^ unbelievably small but cannot find the error...
+
+
+
+
+
+#/////////////////////////////////////////////////////////////////////////
+#### 2018-11-12 Fig: Kaiterra and CPCB locations map csv 11May-10June ####
+#/////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(TMB)
+
+### load envir from whole fit to Kaiterra 11May-10June data
+load('cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData')
+load('kt_11May-10June_TempFit_cs_nS.mesh.36.RData')
+
+
+
+### map both cpcb and kt
+range(kt.loc$lat)
+range(kt.loc$lon)
+
+range(cpcb.loc$lat)
+range(cpcb.loc$lon)
+
+corners.delhi <- list('topleft'=c(28.41, 77.01), # lat/lon
+                      'botright'=c(28.76, 77.39)) # lat/lon
+map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
+                     zoom=NULL,type='stamen-toner') # type='osm'
+
+df.kt.latlon <- SpatialPoints(kt.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.kt.latlon.sp <- spTransform(df.kt.latlon,osm())
+df.cpcb.latlon <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
+df.cpcb.latlon.sp <- spTransform(df.cpcb.latlon,osm())
+
+
+pdf('fig_KaiterraCPCBlocations.pdf',width=7.5,height=8)
+plot(map.delhi,removeMargin=F)
+points(df.kt.latlon.sp,pch=19,col='red')
+points(df.cpcb.latlon.sp,pch=19,col='blue')
+axis(side=1,at=seq(map.delhi$bbox$p1[1],map.delhi$bbox$p2[1],length=5),line=1)
+axis(side=2,at=seq(map.delhi$bbox$p1[2],map.delhi$bbox$p2[2],length=5),line=1)
+title(main="Sensing network and CPCB/DPCC/IMD monitors",
+      xlab='Pseudo-Mercator easting (m)',ylab='Pseudo-Mercator northing (m)')
+legend('topright',c('Our sensors','CPCB/DPCC/IMD'),col=c('red','blue'),
+       pch=c(19,19),bg='white')
+dev.off()
+
+
+
+
+#////////////////////////////////////////////////////////////////////////////
+#### 2018-11-12 CPCB csv 11May-10June, v0.5 cs, leave-one-out CV spatial ####
+#////////////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(TMB)
+
+### create and load function from cpp template
+# compile("TGHM.cpp")
+dyn.load(dynlib("TGHM"))
+
+### load envir from whole fit to Kaiterra 11May-10June data
+load('cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData')
+
+
+### Spatial pred, loop over all sensors, record pred resid (raw diff) for each as a ts
+res.spcv.raw <- matrix(NA_real_,nS,nT) # raw resid for spatial leave-one-out CV
+res.spcv.rel <- res.spcv.raw # divide by obs and *100, relative but no abs val
+
+wallclock <- proc.time()[3]
+for (j in 1:nS){
+  excl.sens <- j # out of nS
+  which.excl <- (1:nT)+(excl.sens-1)*nT # space=outer loop, time=inner loop
+  # ^ excluded values in stacked vector
+  # ^ valid for original data also, because extra loc stacked after
+  
+  logy.vec.full.cv <- logy.vec.full
+  logy.vec.full.cv[which.excl] <- NA # as if missing values
+  obsind.full.cv <- as.integer(!is.na(logy.vec.full.cv))
+  # ^ 1=available, 0=missing value
+  
+  # logy.vec.cv <- logy.vec
+  # logy.vec.cv[which.excl] <- NA # as if missing values
+  
+  
+  # ML fit to sub-sample
+  datalist.full.cv <- list()
+  datalist.full.cv$log_y <- logy.vec.full.cv
+  datalist.full.cv$obsind <- obsind.full.cv
+  datalist.full.cv$zmat <- zmat
+  datalist.full.cv$Bmat <- Bmat 
+  datalist.full.cv$kn <- kn
+  datalist.full.cv$distmat <- distmat.full
+  datalist.full.cv$interceptonly <- 0L # covariates + seasonality
+  
+  obj.full.cv <- MakeADFun(data=datalist.full.cv,parameters=parlist.full,
+                           random=c('X'),DLL="TGHM",silent=T)
+  # ^ 21s for nS.mesh=31 with interceptonly=0 on full data
+  
+  opt.full.cv <- nlminb(start=obj.full.cv$par,obj=obj.full.cv$fn,gr=obj.full.cv$gr,
+                        control=list(eval.max=500,iter.max=500))
+  # ^ 2954s nS.full=59, nT=2881, interceptonly=0 on full data
+  
+  rep.full.cv <- sdreport(obj.full.cv)
+  # ^ 313s nS.full=59, nT=2881, with interceptonly=0 on full data
+  
+  summ.rep.full.cv <- summary(rep.full.cv)
+  
+  # prediction error of excl.sens
+  X.pred.full.cv <- t(matrix(summ.rep.full[dimnames(summ.rep.full.cv)[[1]]=='X',1],
+                             nT,nS.full))
+  
+  detfx.cv <- as.numeric(zmat%*%summ.rep.full.cv[1:3,1])
+  season.cv <- Bmat%*%summ.rep.full.cv[(14+n.full+1):(19+n.full+1),1]
+  fixed.fx.full.cv <- t(matrix(detfx.cv+season.cv,nT,nS.full)) # cs
+  pred.pm.full.cv <- exp(fixed.fx.full.cv+X.pred.full.cv)
+  
+  # plot(pred.pm.full.cv[excl.sens,],y.vec[which.excl],xlim=c(0,600),ylim=c(0,600))
+  # abline(0,1,col='red')
+  
+  res.spcv.raw[j,] <- y.vec[which.excl]-pred.pm.full.cv[excl.sens,] # ts, length=nT
+  res.spcv.rel[j,] <- 100*(y.vec[which.excl]-pred.pm.full.cv[excl.sens,])/
+    y.vec[which.excl]
+  
+  message('loc ',j,' out of ',nS)
+}
+elapsed.time <- proc.time()[3]-wallclock
+print(elapsed.time)
+# ^ 69422s = 19h17 for nS.mesh=31, leave-one-out # 28030s = 7h47 for kt
+
+# par(mfrow=c(2,1))
+# for (j in 1:nS){
+#   plot(cpcb.sens[,1],res.spcv.raw[j,],type='l',
+#        main=paste0('Spatial pred raw resid, sensor ',names.sens[j]))
+#   plot(cpcb.sens[,1],res.spcv.rel[j,],type='l',
+#        main=paste0('Spatial pred rel resid, sensor ',names.sens[j]))
+# }
+# par(mfrow=c(1,1))
+
+# save.image('cpcb_11May-10June_cs_nS.mesh.31_SpatialLOOCV.RData')
+
+
+
+
+
+#//////////////////////////////////////////////////////////////////////
+#### 2018-11-12 CPCB csv 11May-10June, v0.5 cs, 9-fold CV temporal ####
+#//////////////////////////////////////////////////////////////////////
+
+rm(list=ls())
+paf2drop <- '/Users/WAWA/Desktop/Dropbox'
+paf <- paste0(paf2drop,'/PostDoc/AirPollution/epod-nyu-delhi-pollution/spatiotemp')
+setwd(paf)
+
+library(TMB)
+
+### create and load function from cpp template
+# compile("TGHM.cpp")
+dyn.load(dynlib("TGHM"))
+
+### load envir from whole fit to Kaiterra 11May-10June data
+load('cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData')
+
+
+### Temporal pred: 9-fold CV, predict blocks of 320 obs (last=321) for all loc
+nT/9 # 9-fold CV: 8 first blocks with 320 obs and last with 321 obs
+8*320 + 321 # ok
+
+bs <- c(rep(320,8),321) # block sizes, sum(bs)=nT
+
+mape.temp.abs <- double(9) # 9 folds, absolute error
+mape.temp.rel <- mape.temp.abs # relative error
+
+wallclock <- proc.time()[3]
+for (j in 1:9){ # loop over 9 folds
+  btw <- (1:bs[j])+(j-1)*bs[1] # block time window, last one has diff length
+  
+  which.excl <- as.numeric(sapply((1:nS-1)*nT,function(x){x+btw}))
+  # ^ excluded values in full stacked vector, btw for each loc
+  # ^ valid for original data also, because extra loc stacked after
+  
+  logy.vec.full.cv <- logy.vec.full
+  logy.vec.full.cv[which.excl] <- NA # as if missing values
+  
+  obsind.full.cv <- as.integer(!is.na(logy.vec.full.cv))
+  # ^ 1=available, 0=missing value
+  # plot(t(matrix(obsind.full.cv,nT,nS))[2,]) # check zeros in correct places
+  
+  logy.vec.cv <- logy.vec
+  logy.vec.cv[which.excl] <- NA # as if missing values
+  
+  
+  # ML fit to sub-sample
+  datalist.full.cv <- list()
+  datalist.full.cv$log_y <- logy.vec.full.cv
+  datalist.full.cv$obsind <- obsind.full.cv
+  datalist.full.cv$zmat <- zmat
+  datalist.full.cv$Bmat <- Bmat 
+  datalist.full.cv$kn <- kn
+  datalist.full.cv$distmat <- distmat.full
+  datalist.full.cv$interceptonly <- 0L # covariates + seasonality
+  
+  obj.full.cv <- MakeADFun(data=datalist.full.cv,parameters=parlist.full,
+                           random=c('X'),DLL="TGHM",silent=T)
+  # ^ 21s for nS.mesh=31 with interceptonly=0 on full data
+  
+  opt.full.cv <- nlminb(start=obj.full.cv$par,obj=obj.full.cv$fn,gr=obj.full.cv$gr,
+                        control=list(eval.max=500,iter.max=500))
+  # ^ 2954s nS.full=59, nT=2881, interceptonly=0 on full data
+  
+  rep.full.cv <- sdreport(obj.full.cv)
+  # ^ 313s nS.full=59, nT=2881, with interceptonly=0 on full data
+  
+  summ.rep.full.cv <- summary(rep.full.cv)
+  
+  # prediction error of excl.sens
+  X.pred.full.cv <- t(matrix(summ.rep.full[dimnames(summ.rep.full.cv)[[1]]=='X',1],
+                             nT,nS.full))
+  
+  detfx.cv <- as.numeric(zmat%*%summ.rep.full.cv[1:3,1])
+  season.cv <- Bmat%*%summ.rep.full.cv[(14+n.full+1):(19+n.full+1),1]
+  fixed.fx.full.cv <- t(matrix(detfx.cv+season.cv,nT,nS.full)) # cs
+  pred.pm.full.cv <- exp(fixed.fx.full.cv+X.pred.full.cv)
+  
+  # plot(pred.pm.full.cv[which.excl],y.vec[which.excl],xlim=c(0,600),ylim=c(0,600))
+  # abline(0,1,col='red')
+  mape.temp.abs[j] <- mean(abs(y.vec[which.excl]-pred.pm.full.cv[which.excl]),na.rm=T)
+  mape.temp.rel[j] <- mean(abs(y.vec[which.excl]-pred.pm.full.cv[which.excl])/
+                             y.vec[which.excl],na.rm=T)
+  message('fold ',j,' out of 9')
+}
+elapsed.time <- proc.time()[3]-wallclock
+print(elapsed.time)
+# ^ 22795s = 6h20 for nS.mesh=36, 9-fold # 14514s for kt
+
+mape.temp.abs
+mean(mape.temp.abs) # off by 49.68 mu g/m3 on average # 37.65 for kt
+
+mape.temp.rel
+mean(mape.temp.rel) # 88% relative error on average... # 62% for kt
+
+# save.image('cpcb_11May-10June_cs_nS.mesh.31_Temporal9foldCV.RData')
+
+
+
+
+
+
+
 #//////////////////////////////////////////////////////////////////////////
 #### 2018-11-11 CPCB csv 11May-10June, fit v0.5 covariates+seasonality ####
 #//////////////////////////////////////////////////////////////////////////
@@ -103,6 +476,8 @@ map.delhi <- openmap(upperLeft=corners.delhi[[1]],lowerRight=corners.delhi[[2]],
 
 df.latlon <- SpatialPoints(cpcb.loc[,c('lon','lat')],proj4string=CRS("+init=epsg:4326"))
 df.latlon.sp <- spTransform(df.latlon,osm())
+# TODO: modify this in cpcb_11May-10June_TempFit_cs_nS.mesh.31.RData
+
 
 plot(map.delhi,removeMargin=F)
 points(df.latlon.sp,pch=19,col='blue')
@@ -813,7 +1188,6 @@ mean(mape.temp.rel) # 62% relative error on average...
 #   same data so not really comparable.
 
 # save.image('kt_11May-10June_cs_nS.mesh.36_Temporal9foldCV.RData')
-
 
 
 
