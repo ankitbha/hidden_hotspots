@@ -22,6 +22,7 @@ from configs import *
 from random import shuffle
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
+import time
 
 from train_series import plot_preview
 
@@ -103,7 +104,14 @@ if __name__ == '__main__':
 	if args.fold is not None:
 		unit = train_data.shape[1] / nFolds
 		test_data = train_data[:, int(unit*args.fold):int(unit*(args.fold+1))]
-		# print(test_data.shape)
+
+		t0 = datetime.strptime(seg['start'], '%m/%d/%Y')
+		ts = t0 + timedelta(minutes=15 * int(unit * args.fold))
+		tf = t0 + timedelta(minutes=15 * int(unit * (args.fold + 1)))
+
+		start_date = datetime.fromtimestamp(time.mktime(ts.timetuple())).strftime("%m/%d/%Y")
+		end_date = datetime.fromtimestamp(time.mktime(tf.timetuple())).strftime("%m/%d/%Y")
+		print(start_date, end_date)
 
 	if args.load is not None:
 		print(' Loading:', args.load)
