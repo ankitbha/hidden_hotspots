@@ -41,7 +41,7 @@ if __name__ == '__main__':
 	parser.add_argument('--lr', type=float, default=1e-3)
 	parser.add_argument('--batch', type=int, default=32)
 	parser.add_argument('--epochs', type=int, default=4)
-	parser.add_argument('--stride', type=int, default=2, help='Stride factor')
+	parser.add_argument('--stride', type=int, default=1, help='Stride factor')
 	parser.add_argument('--load', type=str, default=None)
 	parser.add_argument('--once', dest='once', action='store_true')
 	parser.set_defaults(once=False)
@@ -126,8 +126,12 @@ if __name__ == '__main__':
 		seqlen = args.history
 		numseqs = 0
 		seqinds = []
+		skipped = 0
 		for ind in range(0, train_data.shape[1] - seqlen, args.stride):
-			# if args.fold is not None:
+			if args.fold is not None:
+				if ind + seqlen > unit * args.fold and ind < unit * (args.fold+1):
+					skipped += 1
+					continue
 			seqinds.append(ind)
 			assert ind < train_data.shape[1]
 			numseqs += 1
@@ -228,11 +232,14 @@ if __name__ == '__main__':
 				fl.write('')
 		# if eii % 5 == 0:
 		with open(logfile, 'a') as fl:
-			fl.write('EPOCH:%d\n' % eii)
-			fl.write('MAPE:%.3f\n' % series_mape)
-			fl.write('MSE_TEST:%.3f\n' % (series_loss * 100.0**2))
-			fl.write('MSE_AVG:%.3f\n' % (mse_avg * 100.0**2))
-			fl.write('MSE_TRAIN:%.3f\n' % (loss.item() * 100.0**2))
+			fl.write(json.dumps({
+				'EPOCH': eii,
+				'MAPE': series_mape,
+				'MSE_TEST': (series_loss * 100.0**2),
+				'MSE_AVG': (mse_avg * 100.0**2),
+				'MSE_TRAIN': (loss.item() * 100.0**2),
+			}) + '\n')
+
 
 		if args.once:
 			break
