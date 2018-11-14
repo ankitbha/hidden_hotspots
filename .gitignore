@@ -11,7 +11,8 @@ outputs
 runs
 *.DS_Store
 *.pth
-
+*.csv
+*.tsv
 # C extensions
 *.so
 <<<<<<< HEAD
