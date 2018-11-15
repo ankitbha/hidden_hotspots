@@ -293,38 +293,74 @@ def create_dataset_weather(segdef, split=0.8, fillmethod=pad_valid, upsamp=None)
 	assert len(names) == len(train_data) - 1
 	return (train_data, test_data), names
 
-def create_dataset_knodes_sensorid(sensor_id, num_nodes, split=0.8):
-        '''
-        Returns train_data and test_data given the sensor_id, num_nodes (K)
-        and the train-test split fraction.
-        '''
-        
-        key = 'knn_pm25_{}_K{:02d}'.format(sensor_id, num_nodes)
-        
-        df = pd.read_csv('datasets/' + key + '.csv', index_col=[0], parse_dates=True)
-        with open('kNN_availability.csv') as fin:
-                for line in fin:
-                        fields = line.split(',', 1)
-                        if fields[0] == key:
-                                start, end, _ = fields[1].split(',')
-                                break
+def create_dataset_knodes_sensorid(
+	sensor_id, num_nodes, split=0.8):
 
-        start_dt, end_dt = pd.Timestamp(start), pd.Timestamp(end)
-        datamat = df.loc[start_dt:end_dt].values
+	'''
+	Returns train_data and test_data given the sensor_id, num_nodes (K)
+	and the train-test split fraction.
+	'''
 
-        len_train = int(split * datamat.shape[0])
-        train_data, test_data = datamat[:len_train,:].T, datamat[len_train:,:].T
+	key = 'knn_pm25_{}_K{:02d}'.format(sensor_id, num_nodes)
 
-        return (train_data, test_data)
+	df = pd.read_csv(
+		KPATH + '/' + key + '.csv',
+		index_col=[0],
+		parse_dates=True)
+	with open('kNN_availability.csv') as fin:
+			for line in fin:
+					fields = line.split(',', 1)
+					if fields[0] == key:
+							start, end, _ = fields[1].split(',')
+							break
 
-def create_dataset_knodes(num_nodes, split=0.8):
-        '''
-        Returns train_data and test_data given the num_nodes (K) and the
-        train-test split fraction.
+	start_dt, end_dt = pd.Timestamp(start), pd.Timestamp(end)
+	datamat = df.loc[start_dt:end_dt].values
 
-        '''
-        pass
+	target = pd.read_csv(
+		find_by_id(sensor_id),
+		index_col=[0],
+		parse_dates=True)
+	targmat = target.loc[start_dt:end_dt].values[:, 0]
+	datamat = np.concatenate([
+		np.expand_dims(targmat, axis=1),
+		datamat], axis=1)
 
+	len_train = int(split * datamat.shape[0])
+	train_data, test_data = datamat[:len_train,:].T, datamat[len_train:,:].T
+
+	return (train_data, test_data)
+
+def create_dataset_knodes(max_nodes=None, split=0.8):
+	'''
+	Returns train_data and test_data given the num_nodes (K) and the
+	train-test split fraction.
+
+	Specify max_nodes to limit # nodes returned as examples
+
+	'''
+
+	with open('.k_train_indices.json') as fl:
+		train_refs = json.load(fl)
+
+	train_refs = list(filter(lambda val: int(val.split('_')[1]) <= max_nodes, train_refs))
+
+	return train_refs
+
+def knodes_batch(batch_refs, histlen=32):
+
+	labels = np.zeros((len(batch_refs), histlen))
+	batch = np.zeros((len(batch_refs), 10, histlen))
+	for rii, ref in enumerate(batch_refs):
+		lid, kval, tind = ref.split('_')
+		kval, tind = int(kval), int(tind)
+		train_set, _ = create_dataset_knodes_sensorid(lid, kval)
+		seg = train_set[1:, tind:tind+histlen]
+		targ = train_set[0, tind:tind+histlen]
+		labels[rii, :] = targ
+		batch[rii, :seg.shape[0], :] = seg
+
+	return batch, labels
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''

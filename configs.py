@@ -1,6 +1,8 @@
 
 DPATH = '/home/ubuntu/datasets-aux/pollution/'
 
+KPATH = '/home/ubuntu/datasets/knn'
+
 savedir = 'datasets/'
 
 SEGMENTS = [
