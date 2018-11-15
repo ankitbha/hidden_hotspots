@@ -293,6 +293,39 @@ def create_dataset_weather(segdef, split=0.8, fillmethod=pad_valid, upsamp=None)
 	assert len(names) == len(train_data) - 1
 	return (train_data, test_data), names
 
+def create_dataset_knodes_sensorid(sensor_id, num_nodes, split=0.8):
+        '''
+        Returns train_data and test_data given the sensor_id, num_nodes (K)
+        and the train-test split fraction.
+        '''
+        
+        key = 'knn_pm25_{}_K{:02d}'.format(sensor_id, num_nodes)
+        
+        df = pd.read_csv('datasets/' + key + '.csv', index_col=[0], parse_dates=True)
+        with open('kNN_availability.csv') as fin:
+                for line in fin:
+                        fields = line.split(',', 1)
+                        if fields[0] == key:
+                                start, end, _ = fields[1].split(',')
+                                break
+
+        start_dt, end_dt = pd.Timestamp(start), pd.Timestamp(end)
+        datamat = df.loc[start_dt:end_dt].values
+
+        len_train = int(split * datamat.shape[0])
+        train_data, test_data = datamat[:len_train,:].T, datamat[len_train:,:].T
+
+        return (train_data, test_data)
+
+def create_dataset_knodes(num_nodes, split=0.8):
+        '''
+        Returns train_data and test_data given the num_nodes (K) and the
+        train-test split fraction.
+
+        '''
+        pass
+
+
 def nextval_batch(datamat, target, inds, history=5):
 	'''
 	inds - array of starting indicies to get sequences from
@@ -540,7 +573,7 @@ def discrete_dataset_ours(
 
 if __name__ == '__main__':
 	BATCHSIZE = 32
-	# (train, test), metadata = create_dataset(SEGMENTS[0])
+	(train, test), metadata = create_dataset(SEGMENTS[0])
 
 	# inds = [0] * BATCHSIZE
 	# segments, labels = nextval_batch(train, 0, inds, history=3)
@@ -556,6 +589,6 @@ if __name__ == '__main__':
 
 	# create_dataset(
 	# 	SEGMENTS[0])
-	create_dataset_weather(SEGMENTS[0], exclude=EXCLUDE[0])
+	# create_dataset_weather(SEGMENTS[0], exclude=EXCLUDE[0])
 
 

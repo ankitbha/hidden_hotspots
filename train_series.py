@@ -100,7 +100,9 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for govdata; check configs...')
+    megroup = parser.add_mutually_exclusive_group(required=True)
+    megroup.add_argument('--segment', type=int, help='Segment to train on; (-1) for govdata; check configs...')
+    megroup.add_argument('--num-nodes', type=int, help='Number of nodes/monitors to use')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     parser.add_argument('--load', type=str, default=None)
@@ -151,7 +153,7 @@ if __name__ == '__main__':
         start_date, end_date = seg['start'], seg['end']
         time_interval = 15        # gov data upsamped to 5 mins
         tag = 'weather'
-    else:
+    elif args.segment > 0:
         # FIXME: update set metadata variables
         use_segment = SEGMENTS[args.segment]
         numsegments = len(use_segment['locations'])
@@ -159,7 +161,13 @@ if __name__ == '__main__':
         tag = 'ours'
         start_date, end_date = use_segment['start'], use_segment['end']
         location_names = [name[0] for name in use_segment['locations']]
-        time_interval =15
+        time_interval = 15
+    elif args.segment == None:
+        # instead of a particular time segment, we will use 'k'
+        # nearest neighbors and train a model
+        (train_data, test_data) = create_dataset_knodes(args.num_nodes)
+        tag = 'k-nearest'
+        
 
     if args.load is not None:
         print(' Loading:', args.load)
