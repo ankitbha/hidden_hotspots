@@ -87,7 +87,7 @@ class NextVal(nn.Module):
 
 class Series(nn.Module):
     name = 'series-v1'
-    def __init__(self, batchsize, historylen, numsegments, hiddensize):
+    def __init__(self, batchsize, historylen, numsegments, hiddensize, deepout=False):
         super(Series, self).__init__()
         '''
         numsegments : this shoud be len(allsegments)
@@ -110,6 +110,12 @@ class Series(nn.Module):
             nn.ReLU(),
         ])
         self.postlstm = nn.Sequential(*[
+            *([] if not deepout else [
+                nn.ReLU(),
+                nn.Linear(hiddensize, hiddensize),
+                nn.ReLU(),
+                nn.Linear(hiddensize, hiddensize),
+            ]),
             nn.ReLU(),
             nn.Linear(hiddensize, 1),   # infer for 1 point given all other
         ])

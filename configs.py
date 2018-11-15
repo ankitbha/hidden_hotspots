@@ -2,6 +2,7 @@
 DPATH = '/home/ubuntu/datasets-aux/pollution/'
 
 KPATH = '/home/ubuntu/datasets/knn'
+KPATH2 = '/home/ubuntu/datasets/knn2'
 LIDS = ['1FD7', 'BFDC', '91B8', '72CA', 'C0A7', 'A9BE', '8E2A', '5D7A', '2E9C', 'E1F8', 'DF07', 'D804', 'E47A', '20CA', 'CBC7', '113E', 'BB4A', 'E8E4', 'BC46', '498F', 'E486', '4BE7']
 savedir = 'datasets/'
 
