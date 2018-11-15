@@ -360,6 +360,9 @@ def knodes_batch(batch_refs, histlen=32):
 		labels[rii, :] = targ
 		batch[rii, :seg.shape[0], :] = seg
 
+	batch /= 100.0
+	labels /= 100.0
+
 	return batch, labels
 
 def nextval_batch(datamat, target, inds, history=5):
