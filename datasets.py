@@ -342,21 +342,38 @@ def create_dataset_knodes(max_nodes=None, split=0.8):
 
 	with open('.k_train_indices.json') as fl:
 		train_refs = json.load(fl)
+	with open('.k_test_indices.json') as fl:
+		test_refs = json.load(fl)
 
 	train_refs = list(filter(lambda val: int(val.split('_')[1]) <= max_nodes, train_refs))
+	test_refs = list(filter(lambda val: int(val.split('_')[1]) <= max_nodes, test_refs))
 
-	return train_refs
+	dataset = {}
+	for lid in LIDS:
+		dataset[lid] = []
+		for kval in range(10):
+			dataset[lid].append(
+				create_dataset_knodes_sensorid(lid, kval+1))
 
-def knodes_batch(batch_refs, histlen=32):
+	return dataset, train_refs, test_refs
+
+def knodes_batch(dataset, batch_refs, histlen=32, mode='train'):
+	from time import time
 
 	labels = np.zeros((len(batch_refs), histlen))
 	batch = np.zeros((len(batch_refs), 10, histlen))
 	for rii, ref in enumerate(batch_refs):
 		lid, kval, tind = ref.split('_')
 		kval, tind = int(kval), int(tind)
-		train_set, _ = create_dataset_knodes_sensorid(lid, kval)
-		seg = train_set[1:, tind:tind+histlen]
-		targ = train_set[0, tind:tind+histlen]
+
+		train_set, test_set = dataset[lid][kval-1]
+
+		if mode == 'train':
+			seg = train_set[1:, tind:tind+histlen]
+			targ = train_set[0, tind:tind+histlen]
+		else:
+			seg = test_set[1:, tind:tind+histlen]
+			targ = test_set[0, tind:tind+histlen]
 		labels[rii, :] = targ
 		batch[rii, :seg.shape[0], :] = seg
 
