@@ -97,6 +97,18 @@ if __name__ == '__main__':
 		start_date, end_date = seg['start'], seg['end']
 		time_interval = 15
 		tag = 'joint_w'
+	elif args.mode == 4:
+		# gov predict gov
+		bad_govs = EXCLUDE[DEFAULTSEG]
+		seg = SEGMENTS[DEFAULTSEG]
+
+		assert args.target < len(seg['locations'])
+		start_date, end_date = seg['start'], seg['end']
+		(train_data, test_data), (_, _, location_names) = create_dataset_gov(
+			start=start_date, end=end_date, exclude=bad_govs, split=split)
+		numsegments = train_data.shape[0]
+		time_interval = 15
+		tag = 'gov'
 	else:
 		raise Exception('Unknown training mode!')
 
