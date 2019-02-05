@@ -1,6 +1,9 @@
 
 DPATH = '/home/ubuntu/datasets-aux/pollution/'
 
+KPATH = '/home/ubuntu/datasets/knn'
+KPATH2 = '/home/ubuntu/datasets/knn2'
+LIDS = ['1FD7', 'BFDC', '91B8', '72CA', 'C0A7', 'A9BE', '8E2A', '5D7A', '2E9C', 'E1F8', 'DF07', 'D804', 'E47A', '20CA', 'CBC7', '113E', 'BB4A', 'E8E4', 'BC46', '498F', 'E486', '4BE7']
 savedir = 'datasets/'
 
 SEGMENTS = [
@@ -47,6 +50,19 @@ SEGMENTS = [
         'start': '07/10/2018',
         'end': '07/24/2018',
     },
+
+    {
+        'locations': [
+            ('U.S. Embassy', 'CBC7'),
+            ('Kailas Office', 'A9BE'),
+            ('Nischal', 'C0A7'),
+            ('Nita', '5D7A'),
+            ('Priti Sood Sayeed', 'E47A'),
+            ('Arun Duggal', '20CA'),
+        ],
+        'start': '05/11/2018',
+        'end': '06/10/2018',
+    },
 ]
 
 
@@ -62,13 +78,15 @@ EXCLUDE = {
         'ITO, New Delhi - CPCB',
         'Punjabi Bagh, Delhi - DPCC',
     ],
-    # 2: [
-    #     'Sirifort, New Delhi - CPCB',
-    #     'Punjabi Bagh, Delhi - DPCC',
+    # TODO: segment 2
 
-    #     # 'Lodhi Road, New Delhi - IMD',
-    #     # 'Jawaharlal Nehru Stadium, Delhi - DPCC',
-    #     # 'Lodhi Road, New Delhi - IMD',
-    #     # 'Sri Aurobindo Marg, Delhi - DPCC',
-    # ]
+    3: [
+        'Sirifort, New Delhi - CPCB',
+        'Dr. Karni Singh Shooting Range, Delhi - DPCC',
+        'Sri Aurobindo Marg, Delhi - DPCC',
+        'Lodhi Road, New Delhi - IMD',
+        'ITO, New Delhi - CPCB',
+        'Mandir Marg, New Delhi - DPCC',
+        'CRRI Mathura Road, New Delhi - IMD',
+    ],
 }

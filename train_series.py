@@ -24,10 +24,8 @@ from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
 
-def plot_preview(tag, epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5, weather=None):
+def plot_preview(imname, tag, epoch, seginfo, target, segments, predictions, loss, histlen, criterion, norm=100.0, interval=5, weather=None):
     (start, end, locations) = seginfo
-    # imgname = 'preview/%s_pred_%d_epoch_%d.png' % (tag, target, epoch)
-    currname = 'images/plots/%s_pred_%d_best.png' % (tag, target)
 
     tf = time.mktime(datetime.strptime(end, '%m/%d/%Y').timetuple())
     t0 = tf - interval * 60 * len(predictions)
@@ -78,15 +76,15 @@ def plot_preview(tag, epoch, seginfo, target, segments, predictions, loss, histl
     plt.xticks([0, len(predictions)-1], [startstr, dstr])
     # plt.savefig(imgname, bbox_inches='tight')
 
-    plt.savefig(currname, bbox_inches='tight')
+    plt.savefig(imname, bbox_inches='tight')
     plt.close()
 
-    for sii, seg in enumerate(segments):
-        plt.figure(figsize=(14, 4))
-        plt.title(locations[sii])
-        plt.plot(seg*norm)
-        plt.savefig('debug/%s.jpg' % locations[sii], bbox_inches='tight')
-        plt.close()
+    # for sii, seg in enumerate(segments):
+    #     plt.figure(figsize=(14, 4))
+    #     plt.title(locations[sii])
+    #     plt.plot(seg*norm)
+    #     plt.savefig('debug/%s.jpg' % locations[sii], bbox_inches='tight')
+    #     plt.close()
 
     return avgloss
 
@@ -102,7 +100,9 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--segment', type=int, required=True, help='Segment to train on; (-1) for govdata; check configs...')
+    megroup = parser.add_mutually_exclusive_group(required=True)
+    megroup.add_argument('--segment', type=int, help='Segment to train on; (-1) for govdata; check configs...')
+    megroup.add_argument('--num-nodes', type=int, help='Number of nodes/monitors to use')
     parser.add_argument('--target', type=int, required=True, help='Target to train for; check configs...')
     parser.add_argument('--stride', type=int, default=2, help='Stride factor')
     parser.add_argument('--load', type=str, default=None)
@@ -134,16 +134,26 @@ if __name__ == '__main__':
         tag = 'joint'
     elif args.segment == -3: # gov + our data
         USESEG = 0
-        bad_govs = EXCLUDE[USESEG]
         seg = SEGMENTS[USESEG]
         assert args.target < len(seg['locations'])
         (train_data, test_data), location_names = create_dataset_weather(
+            seg)
+        numsegments = train_data.shape[0]
+        start_date, end_date = seg['start'], seg['end']
+        time_interval = 15        # gov data upsamped to 5 mins
+        tag = 'wours'
+    elif args.segment == -4: # gov + our data
+        USESEG = 0
+        bad_govs = EXCLUDE[USESEG]
+        seg = SEGMENTS[USESEG]
+        assert args.target < len(seg['locations'])
+        (train_data, test_data), location_names = create_dataset_joint_weather(
             seg, exclude=bad_govs)
         numsegments = train_data.shape[0]
         start_date, end_date = seg['start'], seg['end']
         time_interval = 15        # gov data upsamped to 5 mins
         tag = 'weather'
-    else:
+    elif args.segment > 0:
         # FIXME: update set metadata variables
         use_segment = SEGMENTS[args.segment]
         numsegments = len(use_segment['locations'])
@@ -151,7 +161,13 @@ if __name__ == '__main__':
         tag = 'ours'
         start_date, end_date = use_segment['start'], use_segment['end']
         location_names = [name[0] for name in use_segment['locations']]
-        time_interval =15
+        time_interval = 15
+    elif args.segment == None:
+        # instead of a particular time segment, we will use 'k'
+        # nearest neighbors and train a model
+        (train_data, test_data) = create_dataset_knodes(args.num_nodes)
+        tag = 'k-nearest'
+        
 
     if args.load is not None:
         print(' Loading:', args.load)
@@ -252,7 +268,9 @@ if __name__ == '__main__':
 
         if series_loss < prevloss:
             prevloss = series_loss
+            imname = 'images/plots/%s_pred_%d_best.png' % (tag, args.target)
             mse_avg = plot_preview(
+                imname,
                 tag,
                 eii,
                 (start_date, end_date, location_names),
