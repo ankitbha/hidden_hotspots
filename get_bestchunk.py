@@ -1,26 +1,32 @@
-import sys
+import glob
 
-if len(sys.argv) != 2:
-    print('Provide input file (output of get_timechunks.py).', file=sys.stderr)
-    sys.exit(1)
+flist = glob.iglob('validcounts_cutoff*_*M.txt')
 
-validpercent_max = 0
-remove_list_max = None
-params_max = ''
+validpercent_list = []
+remove_list_list = []
+params_list = []
+cutoff_list = []
 
-with open(sys.argv[1]) as infile:
+for fpath in flist:
+    cutoff = int(fpath.split('_')[1][-2:])
+    with open(fpath) as infile:
+        for line in infile:
+            if line.startswith('Removing'):
+                remove_list = eval(line[9:])
+            else:
+                parts = line.rsplit(',', 1)
+                percent = float(parts[1].strip()[:-1])
+                if percent >= 50:
+                    validpercent_list.append(percent)
+                    remove_list_list.append(remove_list)
+                    params_list.append(parts[0].strip()[5:])
+                    cutoff_list.append(cutoff)
 
-    for line in infile:
-        if line.startswith('Removing'):
-            remove_list = eval(line[9:])
-        else:
-            parts = line.rsplit(',', 1)
-            percent = float(parts[1].strip()[:-1])
-            if percent > validpercent_max:
-                validpercent_max = percent
-                remove_list_max = remove_list
-                params_max = line.strip()
-
-print('Max valid percent:', validpercent_max)
-print('Remove list:', remove_list_max)
-print('Details:', params_max)
+with open('validcounts_bestchunks.txt', 'w') as fout:
+    for tup in zip(validpercent_list, remove_list_list, params_list, cutoff_list):
+        validpercent, remove_list, params, cutoff = tup
+        fout.write('\nMax valid percent: {}\n'.format(validpercent))
+        fout.write('Remove count: {}\n'.format(len(remove_list)))
+        fout.write('Remove list: {}\n'.format(remove_list))
+        fout.write('Removal cutoff percent: {}\n'.format(cutoff))
+        fout.write('Details: {}\n'.format(params))

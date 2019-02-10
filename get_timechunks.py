@@ -88,7 +88,7 @@ if __name__ == '__main__':
     if args.outsuffix != '':
         args.outsuffix = '_' + args.outsuffix
 
-    outfpath = 'validcounts_cutoff{}_{}M{}.txt'.format(args.cutoff, args.duration, args.outsuffix)
+    outfpath = 'validcounts_cutoff{:02d}_{:02d}M{}.txt'.format(args.cutoff, args.duration, args.outsuffix)
         
     fout = open(outfpath, 'w')
 
