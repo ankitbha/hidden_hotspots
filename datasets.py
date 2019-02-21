@@ -672,6 +672,63 @@ def discrete_dataset_ours(
 	return ((datamat, train_inds), reserved), [nm[0] for nm in eval_segment['locations']]
 
 
+def cache_knn_availability(version, date):
+    
+    '''Cache availability of each kNN dataset (for a value of sensor and
+    K) in a .csv file for easy future access. Availability basically
+    means the largest contiguous segment for each kNN dataset.
+    
+    There is usually no need to call this function explicitly.
+    
+    '''
+    from tqdm import tqdm
+    
+    # e.g. version 'v1', date '2018_Sep_28'
+    inpath = os.path.join('datasets', 'knn_{}_{}'.format(version, date), '*.csv')
+    fileslist = glob(inpath)
+    fileslist.sort()
+    
+    print('Caching availability for kNN datasets, version {} and date {} ... '.format(version, date),
+          end='', flush=True)
+
+    outdir = 'output'
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+    fout = open(os.path.join(outdir, 'knn_{}_{}_availability.csv'.format(version, date)), 'w')
+    fout.write('kNN dataset file,Start time,End time,Number of valid points\n')
+    for fpath in tqdm(fileslist):
+        df = pd.read_csv(fpath, index_col=[0], parse_dates=True)
+        index_start_final = index_end_final = None
+        count_final = 0
+        index_start = index_end = None
+        count = 0
+        state = False
+        for tup in df.itertuples():
+            if ~np.isnan(tup[1:]).any():
+                count += 1
+                if state == False:
+                    # entering a contiguous region
+                    state = True
+                    index_start = tup[0]
+                    index_end = tup[0]
+                else:
+                    # already in a contiguous region
+                    index_end = tup[0]
+            else:
+                if state == True:
+                    # end of a contiguous region
+                    state = False
+                    if count > count_final:
+                        count_final = count
+                        index_start_final = index_start
+                        index_end_final = index_end
+                        count = 0
+                        index_start = index_end = None
+        fout.write('{},{},{},{}\n'.format(os.path.split(fpath)[1][:-4], index_start_final.isoformat(), index_end_final.isoformat(), count_final))
+    fout.close()
+    
+    print('done.')
+
 if __name__ == '__main__':
 	BATCHSIZE = 32
 	(train, test), metadata = create_dataset(SEGMENTS[0])
