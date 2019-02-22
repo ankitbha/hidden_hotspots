@@ -474,11 +474,14 @@ def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor=
                 if not df_reind.iloc[tii:tii+histlen,:].isnull().any(axis=None):
                     validinds.append(tii)
             validinds = np.asarray(validinds)
-                        
+            
             # get approximate split of indices, renaming 'len_train'
             # to 'test_begin'
             test_begin = int(split * len(validinds))
 
+            if test_begin == 0:
+                continue
+            
             # train and test regions may overlap because of 'histlen',
             # hence adjust the split correctly so that no index+histlen
             # region of train data is in the test data
@@ -503,8 +506,13 @@ def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor=
             #     count += 1
 
             train_end = test_begin - 1
-            while validinds[train_end] + histlen <= test_begin:
-                ind -= 1
+            while train_end > 0 and validinds[train_end] + histlen <= test_begin:
+                train_end -= 1
+            
+            if validinds[train_end] + histlen <= test_begin:
+                # basically no split is possible without train and
+                # test regions overlapping
+                continue
             
             traininds, testinds = validinds[:train_end+1], validinds[test_begin:]
             trainrefs.extend([(fieldeggid, ind) for ind in traininds])
