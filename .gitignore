@@ -117,3 +117,4 @@ venv.bak/
 # CUSTOM
 output/
 datasets/
+models/

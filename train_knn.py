@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
 # import threading
@@ -68,6 +67,9 @@ def train(K, args):
         losses = []
         nBatches = len(trainrefs)//args.batch
         for bii in range(0, len(trainrefs) - args.batch, args.batch):
+            if (bii//args.batch) == 10:
+                break
+            
             model.train()
             
             batchrefs = trainrefs[bii:bii+args.batch]
@@ -89,7 +91,7 @@ def train(K, args):
             loss.backward()
             optimizer.step()
 
-            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f          \r' % (
+            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f          \n' % (
                 eii+1, args.epochs,
                 bii//args.batch+1, nBatches,
                 loss.item() * 100.0**2,
@@ -101,6 +103,9 @@ def train(K, args):
         tmape = 0
         print()
         for bii in range(0, len(testrefs) - args.batch, args.batch):
+            if (bii//args.batch) == 10:
+                break
+            
             model.eval()
 
             batchrefs = testrefs[bii:bii+args.batch]
@@ -131,7 +136,10 @@ def train(K, args):
         tloss /= nBatches
         print('   Testing Loss:  %.3f      Testing MAPE: %.1f%%' % (
             tloss * 100.0**2, tmape))
-    pass
+    
+    # save the trained model
+    torch.save(model.state_dict(), 'models/model-{}-{}-{}-{}.pth'.format(K, args.knn_version, args.datesuffix, args.sensor))
+    return
 
 
 
