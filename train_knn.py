@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import threading
+# import threading
 
 from datasets import create_dataset_knn, batch_knn
 from nets import Series
@@ -161,17 +161,17 @@ if __name__=='__main__':
         raise SystemExit()
     
     # create threads for training
-    threads_list = []
-    for K in range(1, args.maxneighbors+1):
-        thread = threading.Thread(target=train, args=(K, args), name='{}-NN trainer'.format(K))
-        thread.start()
-        threads_list.append(thread)
-
-    for thread in threads_list:
-        thread.join()
+    # threads_list = []
+    # for K in range(1, args.maxneighbors+1):
+    #     thread = threading.Thread(target=train, args=(K, args), name='{}-NN trainer'.format(K))
+    #     thread.start()
+    #     threads_list.append(thread)
     
-
-
+    # for thread in threads_list:
+    #     thread.join()
+    
+    train(args.maxneighbors, args)
+    
     # for ii in range(5, 10):
     #     knearest(ii)
 
