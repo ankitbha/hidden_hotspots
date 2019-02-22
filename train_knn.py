@@ -14,13 +14,13 @@ from datasets import create_dataset_knn, batch_knn
 from nets import Series
 from torch.autograd import Variable
 
-def prettyprint_args(ns):
-    print(os.linesep + 'Input argument --')
+def prettyprint_args(ns, outfile=sys.stdout):
+    print('\nInput argument --', file=outfile)
 
     for k,v in ns.__dict__.items():
-        print('{}: {}'.format(k,v))
+        print('{}: {}'.format(k,v), file=outfile)
 
-    print()
+    print(file=outfile)
     return
 
 def frac(arg):
@@ -33,7 +33,7 @@ def frac(arg):
     return
 
 
-def train(K, args):
+def train(K, args, logfile=None):
     ''' Training code to be run inside a thread. '''
     
     # use cuda if available
@@ -60,14 +60,16 @@ def train(K, args):
     
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    
+
     for eii in range(args.epochs):
         
         np.random.shuffle(trainrefs)
         losses = []
         nBatches = len(trainrefs)//args.batch
         for bii in range(0, len(trainrefs) - args.batch, args.batch):
-            if (bii//args.batch) == 10:
+
+            batchcount = bii//args.batch
+            if batchcount == args.max_batches:
                 break
             
             model.train()
@@ -91,19 +93,25 @@ def train(K, args):
             loss.backward()
             optimizer.step()
 
-            sys.stdout.write('[E:%d/%d] B:%d/%d  loss: %.2f          \n' % (
+            disp_string = '[E:{}/{}] B:{}/{}  loss: {:.2f}\n'.format(
                 eii+1, args.epochs,
-                bii//args.batch+1, nBatches,
-                loss.item() * 100.0**2,
-            ))
-            sys.stdout.flush()
-
+                batchcount+1, nBatches,
+                loss.item() * 100.0**2)
+            sys.stdout.write(disp_string)
+            
+            if logfile != None:
+                logfile.write(disp_string)
+        
         nBatches = len(testrefs)//args.batch
         tloss = 0
         tmape = 0
-        print()
+        
         for bii in range(0, len(testrefs) - args.batch, args.batch):
-            if (bii//args.batch) == 10:
+
+            sys.stdout.write('\r')
+
+            batchcount = bii//args.batch
+            if batchcount == args.max_batches:
                 break
             
             model.eval()
@@ -127,18 +135,24 @@ def train(K, args):
             batch_lbls[batch_lbls == 0] = 0.01
             tmape += np.mean(np.abs((preds - batch_lbls) / batch_lbls))
 
-            sys.stdout.write('Testing %d/%d       \r' % (
-                bii//args.batch+1, nBatches
-            ))
-    #         break
+            disp_string = 'Testing {}/{}'.format(batchcount+1, nBatches)
+            sys.stdout.write(disp_string)
+            sys.stdout.flush()
+        
+        logfile.write(disp_string)
+        logfile.flush()
+        
         tmape /= nBatches
         tmape *= 100.0
         tloss /= nBatches
-        print('   Testing Loss:  %.3f      Testing MAPE: %.1f%%' % (
-            tloss * 100.0**2, tmape))
+        disp_string = '\n   Testing Loss:  {:.3f}      Testing MAPE: {:.1f}% \n'.format(tloss * 100.0**2, tmape)
+        sys.stdout.write(disp_string)
+        
+        if logfile != None:
+            logfile.write(disp_string)
     
     # save the trained model
-    torch.save(model.state_dict(), 'models/model-{}-{}-{}-{}.pth'.format(K, args.knn_version, args.datesuffix, args.sensor))
+    torch.save(model.state_dict(), 'models/model_K{:02d}_{}_{}_{}.pth'.format(K, args.knn_version, args.datesuffix, args.sensor))
     return
 
 
@@ -147,7 +161,7 @@ def train(K, args):
 if __name__=='__main__':
     
     parser = argparse.ArgumentParser(description='Spatio-temporal LSTM for air quality prediction')
-    parser.add_argument('maxneighbors', type=int, help='Max number of nearest neighbors to use (K)')
+    parser.add_argument('numneighbors', type=int, help='Number of nearest neighbors to use (K)')
     parser.add_argument('knn_version', choices=('v1', 'v2'), help='Version 1 or 2')
     parser.add_argument('--data-version', default='2019_Feb_05', dest='datesuffix', help='Version of raw data to use')
     parser.add_argument('--sensor', choices=('pm25', 'pm10'), default='pm25', help='Type of sensory data')
@@ -158,15 +172,22 @@ if __name__=='__main__':
     parser.add_argument('--lr', type=float, default=5e-4, help='Learning rate')
     parser.add_argument('--epochs', type=int, default=120, help='Number of epochs for training')
     parser.add_argument('--split', type=frac, default=0.8, help='Train-test split fraction')
+    parser.add_argument('--max-batches', type=int, help='Max number of batches')
+    parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
     args = parser.parse_args()
     
     # confirm before beginning execution
     prettyprint_args(args)
-    
-    confirm = input('Proceed? (y/n) ')
-    if confirm.strip().lower() != 'y':
-        print('Confirm by typing in \'y\' or \'Y\' only.')
-        raise SystemExit()
+
+    if not args.yes:
+        confirm = input('Proceed? (y/n) ')
+        if confirm.strip().lower() != 'y':
+            print('Confirm by typing in \'y\' or \'Y\' only.')
+            raise SystemExit()
+
+    # begin logging
+    fout = open('output/model_K{:02d}_{}_{}_{}.out'.format(args.numneighbors, args.knn_version, args.datesuffix, args.sensor), 'w')
+    prettyprint_args(args, outfile=fout)
     
     # create threads for training
     # threads_list = []
@@ -178,11 +199,11 @@ if __name__=='__main__':
     # for thread in threads_list:
     #     thread.join()
     
-    train(args.maxneighbors, args)
+    train(args.numneighbors, args, logfile=fout)
+    fout.close()
     
     # for ii in range(5, 10):
     #     knearest(ii)
-
 
 
 def knearest(kk):
