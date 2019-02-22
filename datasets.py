@@ -406,6 +406,118 @@ def create_dataset_knodes(max_nodes=None, split=0.8, data_version=create_dataset
 
 	return dataset, train_refs, test_refs
 
+def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor='pm25',
+                       stride=1, histlen=32, split=0.8):
+    
+    '''Retrieve data for a value of K, and split into train-test. Also
+    return the indices for training in each file (read from cache,
+    else cache it and return it)
+    
+    '''
+    from tqdm import tqdm
+
+    pathgen = None
+    if version == 'v1':
+        pathgen = 'datasets/knn_{}_{}/knn_{}_*_K{:02d}.csv'.format(version, datesuffix, sensor, numnodes)
+    else:
+        pathgen = 'datasets/knn_{}_{}/knn_{}disttheta_*_K{:02d}.csv'.format(version, datesuffix, sensor, numnodes)
+    
+    flist = glob(pathgen)
+    
+    dfs_list = []
+    trainrefs = []
+    testrefs = []
+    cache = False
+    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    if os.path.exists(cache_path1) and os.path.exists(cache_path2):
+        cache = True
+        trainrefs = np.loadtxt(cache_path1, dtype=str)
+        trainrefs = list(zip(trainrefs[:,0], trainrefs[:,1].astype(int)))
+        testrefs = np.loadtxt(cache_path2, dtype=str)
+        testrefs = list(zip(testrefs[:,0], testrefs[:,1].astype(int)))
+    
+    for fpath in tqdm(flist, desc='Reading for {}-NN'.format(numnodes)):
+        
+        fieldeggid = os.path.basename(fpath).split('_')[2]
+
+        df = pd.read_csv(fpath, usecols=lambda colname: colname != 'timestamp_round')
+        df.rename({fieldeggid:'target'}, axis='columns', inplace=True)
+        # df = pd.read_csv(fpath, index_col=[0], parse_dates=True)
+        # df.tz_localize('UTC', copy=False)
+        # df.tz_convert('Asia/Kolkata', copy=False)
+        
+        # create new dataframe with MultiIndex (fieldeggid, index) for
+        # quick indexing while creating batches during training
+        df_reind = pd.DataFrame(data=df.values,
+                                index=pd.MultiIndex.from_product([[fieldeggid], df.index], names=('fieldeggid', 'ref')),
+                                columns=df.columns)
+        
+        # some normalizations
+        df_reind.iloc[:,0] /= 100.0
+        
+        if version == 'v1':
+            df_reind.iloc[:, 1:] /= 100.0
+        else:
+            df_reind.iloc[:, 1::3] /= 100.0
+            df_reind.iloc[:, 2::3] /= 1000.0
+            df_reind.iloc[:, 3::3] /= 100.0
+
+        dfs_list.append(df_reind)
+    
+        # get trainrefs and testrefs if not already cached -- valid
+        # indices from which contiguous blocks of 'histlen' length of
+        # data are available
+        if not cache:
+            validinds = []
+            for tii in range(0, df_reind.shape[0]-histlen, stride):
+                if not df_reind.iloc[tii:tii+histlen,:].isnull().any(axis=None):
+                    validinds.append(tii)
+            validinds = np.asarray(validinds)
+                        
+            # get approximate split of indices, renaming 'len_train'
+            # to 'test_begin'
+            test_begin = int(split * len(validinds))
+
+            # train and test regions may overlap because of 'histlen',
+            # hence adjust the split correctly so that no index+histlen
+            # region of train data is in the test data
+
+            # This is risky, since it could skew the split far beyond
+            # the requested split, and also could potentially be an
+            # infinite loop
+            
+            # len_total = len(validinds)
+            # count = 0
+            # while True:
+            #     # keep expanding out on either direction (with slight
+            #     # preference to the side where train size becomes bigger)
+            #     if len_train+count < len_total:
+            #         if validinds[len_train+count-1] + histlen < validinds[len_train+count]:
+            #             len_train += count
+            #             break
+            #     if len_train-count-1 >= 0:
+            #         if validinds[len_train-count-1] + histlen < validinds[len_train-count]:
+            #             len_train -= count
+            #             break
+            #     count += 1
+
+            train_end = test_begin - 1
+            while validinds[train_end] + histlen <= test_begin:
+                ind -= 1
+            
+            traininds, testinds = validinds[:train_end+1], validinds[test_begin:]
+            trainrefs.extend([(fieldeggid, ind) for ind in traininds])
+            testrefs.extend([(fieldeggid, ind) for ind in testinds])
+
+    if not cache:
+        np.savetxt(cache_path1, trainrefs, fmt='%s')
+        np.savetxt(cache_path2, testrefs, fmt='%s')
+
+    df_all = pd.concat(dfs_list, axis=0)
+    return df_all, trainrefs, testrefs
+
+
 def knodes_batch(dataset, batch_refs, histlen=32, mode='train', pad=30):
 	from time import time
 
@@ -426,6 +538,20 @@ def knodes_batch(dataset, batch_refs, histlen=32, mode='train', pad=30):
 		batch[rii, :seg.shape[0], :] = seg
 
 	return batch, labels
+
+def batch_knn(dataset_df, batchrefs, histlen):
+
+    labels = np.zeros((len(batchrefs), histlen))
+    batch = np.zeros((len(batchrefs), dataset_df.shape[1]-1, histlen))
+
+    for rii, ref in enumerate(batchrefs):
+        fieldeggid, start = ref
+        dataset_df_batch = dataset_df.loc[(fieldeggid, range(start, start+histlen)), :]
+        batch[rii, :, :] = dataset_df_batch.iloc[:,1:].values.T
+        labels[rii, :] = dataset_df_batch.iloc[:,0].values
+    
+    return batch, labels
+    
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''
