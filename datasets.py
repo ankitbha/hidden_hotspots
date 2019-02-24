@@ -406,6 +406,149 @@ def create_dataset_knodes(max_nodes=None, split=0.8, data_version=create_dataset
 
 	return dataset, train_refs, test_refs
 
+
+def create_dataset_knn_sensor(numnodes, fieldeggid, version='v1', datesuffix='2019_Feb_05', sensor='pm25',
+                              stride=1, histlen=32, split=0.8):
+
+    '''Retrieve data for a value of K and a particular sensor, and split
+    into train-test. Also return the indices for training in each file
+    (read from cache, else cache it and return it)
+    
+    '''
+    
+    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    
+    if os.path.exists(cache_path1) and os.path.exists(cache_path2):
+        trainrefs = np.loadtxt(cache_path1, dtype=str)
+        testrefs = np.loadtxt(cache_path2, dtype=str)
+        
+        fpath = None
+        if version == 'v1':
+            fpath = 'datasets/knn_{}_{}/knn_{}_{}_K{:02d}.csv'.format(version, datesuffix, sensor, fieldeggid, numnodes)
+        else:
+            fpath = 'datasets/knn_{}_{}/knn_{}disttheta_{}_K{:02d}.csv'.format(version, datesuffix, sensor, fieldeggid, numnodes)
+        
+        df = pd.read_csv(fpath, index_col=[0])
+        df.rename({fieldeggid:'target'}, axis='columns', inplace=True)
+        
+        # some normalizations
+        df.iloc[:,0] /= 100.0
+        
+        if version == 'v1':
+            df.iloc[:, 1:] /= 100.0
+        else:
+            df.iloc[:, 1::3] /= 100.0
+            df.iloc[:, 2::3] /= 1000.0
+            df.iloc[:, 3::3] /= 100.0
+    else:
+        df_all, trainrefs, testrefs = create_dataset_knn(numnodes, version, datesuffix, sensor, stride, histlen, split)
+        df = df_all.loc[(fieldeggid, slice(None)),:]
+    
+    trainrefs = trainrefs[(trainrefs==fieldeggid)[:,0],:]
+    trainrefs = list(zip(trainrefs[:,0], trainrefs[:,1].astype(int)))
+    testrefs = testrefs[(testrefs==fieldeggid)[:,0],:]
+    testrefs = list(zip(testrefs[:,0], testrefs[:,1].astype(int)))
+    
+    return df, trainrefs, testrefs
+
+
+def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor='pm25',
+                       stride=1, histlen=32, split=0.8):
+    
+    '''Retrieve data for a value of K, and split into train-test. Also
+    return the indices for training in each file (read from cache,
+    else cache it and return it)
+    
+    '''
+    from tqdm import tqdm
+    
+    pathgen = None
+    if version == 'v1':
+        pathgen = 'datasets/knn_{}_{}/knn_{}_*_K{:02d}.csv'.format(version, datesuffix, sensor, numnodes)
+    else:
+        pathgen = 'datasets/knn_{}_{}/knn_{}disttheta_*_K{:02d}.csv'.format(version, datesuffix, sensor, numnodes)
+    
+    flist = glob(pathgen)
+    
+    dfs_list = []
+    trainrefs = []
+    testrefs = []
+    cache = False
+    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    if os.path.exists(cache_path1) and os.path.exists(cache_path2):
+        cache = True
+        trainrefs = np.loadtxt(cache_path1, dtype=str)
+        trainrefs = list(zip(trainrefs[:,0], trainrefs[:,1].astype(int)))
+        testrefs = np.loadtxt(cache_path2, dtype=str)
+        testrefs = list(zip(testrefs[:,0], testrefs[:,1].astype(int)))
+    
+    for fpath in tqdm(flist, desc='Reading for {}-NN'.format(numnodes)):
+        
+        fieldeggid = os.path.basename(fpath).split('_')[2]
+        
+        df = pd.read_csv(fpath, index_col=[0])
+        df.rename({fieldeggid:'target'}, axis='columns', inplace=True)
+        
+        # create new dataframe with MultiIndex (fieldeggid, index) for
+        # quick indexing while creating batches during training
+        df_reind = pd.DataFrame(data=df.values,
+                                index=pd.MultiIndex.from_product([[fieldeggid], df.index], names=('fieldeggid', 'ref')),
+                                columns=df.columns)
+        
+        # some normalizations
+        df_reind.iloc[:,0] /= 100.0
+        
+        if version == 'v1':
+            df_reind.iloc[:, 1:] /= 100.0
+        else:
+            df_reind.iloc[:, 1::3] /= 100.0
+            df_reind.iloc[:, 2::3] /= 1000.0
+            df_reind.iloc[:, 3::3] /= 100.0
+        
+        dfs_list.append(df_reind)
+        
+        # get trainrefs and testrefs if not already cached -- valid
+        # indices from which contiguous blocks of 'histlen' length of
+        # data are available
+        if not cache:
+            validinds = []
+            for tii in range(0, df_reind.shape[0]-histlen, stride):
+                if not df_reind.iloc[tii:tii+histlen,:].isnull().any(axis=None):
+                    validinds.append(tii)
+            validinds = np.asarray(validinds)
+            
+            # get approximate split of indices, renaming 'len_train'
+            # to 'test_begin'
+            test_begin = int(split * len(validinds))
+            if test_begin == 0:
+                continue
+            
+            # train and test regions may overlap because of 'histlen',
+            # hence adjust the split correctly so that no index+histlen
+            # region of train data is in the test data
+            train_end = test_begin - 1
+            while train_end > 0 and validinds[train_end] + histlen <= test_begin:
+                train_end -= 1
+            
+            if validinds[train_end] + histlen <= test_begin:
+                # basically no split is possible without train and
+                # test regions overlapping
+                continue
+            
+            traininds, testinds = validinds[:train_end+1], validinds[test_begin:]
+            trainrefs.extend([(fieldeggid, ind) for ind in traininds])
+            testrefs.extend([(fieldeggid, ind) for ind in testinds])
+    
+    if not cache:
+        np.savetxt(cache_path1, trainrefs, fmt='%s')
+        np.savetxt(cache_path2, testrefs, fmt='%s')
+    
+    df_all = pd.concat(dfs_list, axis=0)
+    return df_all, trainrefs, testrefs
+
+
 def knodes_batch(dataset, batch_refs, histlen=32, mode='train', pad=30):
 	from time import time
 
@@ -426,6 +569,21 @@ def knodes_batch(dataset, batch_refs, histlen=32, mode='train', pad=30):
 		batch[rii, :seg.shape[0], :] = seg
 
 	return batch, labels
+
+
+def batch_knn(dataset_df, batchrefs, histlen):
+
+    labels = np.zeros((len(batchrefs), histlen))
+    batch = np.zeros((len(batchrefs), dataset_df.shape[1]-1, histlen))
+
+    for rii, ref in enumerate(batchrefs):
+        fieldeggid, start = ref
+        dataset_df_batch = dataset_df.loc[(fieldeggid, slice(None)), :].iloc[start:start+histlen]
+        batch[rii, :, :] = dataset_df_batch.iloc[:,1:].values.T
+        labels[rii, :] = dataset_df_batch.iloc[:,0].values
+    
+    return batch, labels
+    
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''
@@ -671,6 +829,63 @@ def discrete_dataset_ours(
 	# series_batch can be used to get batches from this info
 	return ((datamat, train_inds), reserved), [nm[0] for nm in eval_segment['locations']]
 
+
+def cache_knn_availability(version, date):
+    
+    '''Cache availability of each kNN dataset (for a value of sensor and
+    K) in a .csv file for easy future access. Availability basically
+    means the largest contiguous segment for each kNN dataset.
+    
+    There is usually no need to call this function explicitly.
+    
+    '''
+    from tqdm import tqdm
+    
+    # e.g. version 'v1', date '2018_Sep_28'
+    inpath = os.path.join('datasets', 'knn_{}_{}'.format(version, date), '*.csv')
+    fileslist = glob(inpath)
+    fileslist.sort()
+    
+    print('Caching availability for kNN datasets, version {} and date {} ... '.format(version, date),
+          end='', flush=True)
+
+    outdir = 'output'
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+    fout = open(os.path.join(outdir, 'knn_{}_{}_availability.csv'.format(version, date)), 'w')
+    fout.write('kNN dataset file,Start time,End time,Number of valid points\n')
+    for fpath in tqdm(fileslist):
+        df = pd.read_csv(fpath, index_col=[0], parse_dates=True)
+        index_start_final = index_end_final = None
+        count_final = 0
+        index_start = index_end = None
+        count = 0
+        state = False
+        for tup in df.itertuples():
+            if ~np.isnan(tup[1:]).any():
+                count += 1
+                if state == False:
+                    # entering a contiguous region
+                    state = True
+                    index_start = tup[0]
+                    index_end = tup[0]
+                else:
+                    # already in a contiguous region
+                    index_end = tup[0]
+            else:
+                if state == True:
+                    # end of a contiguous region
+                    state = False
+                    if count > count_final:
+                        count_final = count
+                        index_start_final = index_start
+                        index_end_final = index_end
+                        count = 0
+                        index_start = index_end = None
+        fout.write('{},{},{},{}\n'.format(os.path.split(fpath)[1][:-4], index_start_final.isoformat(), index_end_final.isoformat(), count_final))
+    fout.close()
+    
+    print('done.')
 
 if __name__ == '__main__':
 	BATCHSIZE = 32

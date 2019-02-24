@@ -16,11 +16,7 @@ runs
 *.eps
 # C extensions
 *.so
-<<<<<<< HEAD
 debug
-=======
->>>>>>> master
-outputs
 # Distribution / packaging
 .Python
 build/
@@ -119,3 +115,7 @@ venv.bak/
 .mypy_cache/
 
 # CUSTOM
+output/
+datasets/
+models/
+plots/
