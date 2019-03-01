@@ -407,8 +407,51 @@ def create_dataset_knodes(max_nodes=None, split=0.8, data_version=create_dataset
 	return dataset, train_refs, test_refs
 
 
-def create_dataset_knn_sensor(numnodes, fieldeggid, version='v1', datesuffix='2019_Feb_05', sensor='pm25',
-                              stride=1, histlen=32, split=0.8):
+def read_knn(fpath, version):
+    
+    df = pd.read_csv(fpath, index_col=[0])
+    
+    # some normalizations
+    df.iloc[:,0] /= 100.0
+    
+    if version == 'v1':
+        df.iloc[:, 1:] /= 100.0
+    else:
+        df.iloc[:, 1::3] /= 100.0
+        df.iloc[:, 2::3] /= 1000.0
+        df.iloc[:, 3::3] /= 100.0
+
+    return df
+
+
+def read_refs(fpath):
+    refs = []
+    with open(fpath) as fin:
+        for line in fin:
+            fields = line.split()
+            refs.append((fields[0], int(fields[1])))
+    return refs
+
+
+def read_refs_monitorid(fpath, monitorid):
+    refs = []
+    with open(fpath) as fin:
+        for line in fin:
+            fields = line.split()
+            if fields[0] == monitorid:
+                refs.append((fields[0], int(fields[1])))
+    return refs
+
+
+def save_refs(fpath, refs):
+    refs.sort()
+    with open(fpath, 'w') as fout:
+        for ref in refs:
+            fout.write('{} {}\n'.format(*ref))
+    return
+
+
+def create_dataset_knn_sensor(source, monitorid, sensor, numnodes, version, stride=1, histlen=32, split=0.8):
 
     '''Retrieve data for a value of K and a particular sensor, and split
     into train-test. Also return the indices for training in each file
@@ -416,45 +459,29 @@ def create_dataset_knn_sensor(numnodes, fieldeggid, version='v1', datesuffix='20
     
     '''
     
-    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
-    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
+    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
     
     if os.path.exists(cache_path1) and os.path.exists(cache_path2):
-        trainrefs = np.loadtxt(cache_path1, dtype=str)
-        testrefs = np.loadtxt(cache_path2, dtype=str)
+        trainrefs = read_refs_monitorid(cache_path1, monitorid)
+        testrefs = read_refs_monitorid(cache_path2, monitorid)
         
         fpath = None
         if version == 'v1':
-            fpath = 'datasets/knn_{}_{}/knn_{}_{}_K{:02d}.csv'.format(version, datesuffix, sensor, fieldeggid, numnodes)
+            fpath = 'datasets/knn_{}_{}/knn_{}_{}_K{:02d}.csv'.format(version, source, sensor, monitorid, numnodes)
         else:
-            fpath = 'datasets/knn_{}_{}/knn_{}disttheta_{}_K{:02d}.csv'.format(version, datesuffix, sensor, fieldeggid, numnodes)
+            fpath = 'datasets/knn_{}_{}/knn_{}disttheta_{}_K{:02d}.csv'.format(version, source, sensor, monitorid, numnodes)
         
-        df = pd.read_csv(fpath, index_col=[0])
-        df.rename({fieldeggid:'target'}, axis='columns', inplace=True)
-        
-        # some normalizations
-        df.iloc[:,0] /= 100.0
-        
-        if version == 'v1':
-            df.iloc[:, 1:] /= 100.0
-        else:
-            df.iloc[:, 1::3] /= 100.0
-            df.iloc[:, 2::3] /= 1000.0
-            df.iloc[:, 3::3] /= 100.0
+        df = read_knn(fpath, version)
+        df.rename({monitorid:'target'}, axis='columns', inplace=True)
     else:
-        df_all, trainrefs, testrefs = create_dataset_knn(numnodes, version, datesuffix, sensor, stride, histlen, split)
-        df = df_all.loc[(fieldeggid, slice(None)),:]
-    
-    trainrefs = trainrefs[(trainrefs==fieldeggid)[:,0],:]
-    trainrefs = list(zip(trainrefs[:,0], trainrefs[:,1].astype(int)))
-    testrefs = testrefs[(testrefs==fieldeggid)[:,0],:]
-    testrefs = list(zip(testrefs[:,0], testrefs[:,1].astype(int)))
+        df_all, trainrefs, testrefs = create_dataset_knn(source, sensor, numnodes, version, stride, histlen, split)
+        df = df_all.loc[(monitorid, slice(None)),:]
     
     return df, trainrefs, testrefs
 
 
-def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor='pm25',
-                       stride=1, histlen=32, split=0.8):
+def create_dataset_knn(source, sensor, numnodes, version, stride=1, histlen=32, split=0.8):
     
     '''Retrieve data for a value of K, and split into train-test. Also
     return the indices for training in each file (read from cache,
@@ -465,9 +492,9 @@ def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor=
     
     pathgen = None
     if version == 'v1':
-        pathgen = 'datasets/knn_{}_{}/knn_{}_*_K{:02d}.csv'.format(version, datesuffix, sensor, numnodes)
+        pathgen = 'datasets/knn_{}_{}/knn_{}_*_K{:02d}.csv'.format(version, source, sensor, numnodes)
     else:
-        pathgen = 'datasets/knn_{}_{}/knn_{}disttheta_*_K{:02d}.csv'.format(version, datesuffix, sensor, numnodes)
+        pathgen = 'datasets/knn_{}_{}/knn_{}disttheta_*_K{:02d}.csv'.format(version, source, sensor, numnodes)
     
     flist = glob(pathgen)
     
@@ -475,77 +502,54 @@ def create_dataset_knn(numnodes, version='v1', datesuffix='2019_Feb_05', sensor=
     trainrefs = []
     testrefs = []
     cache = False
-    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
-    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}.txt'.format(datesuffix, sensor, numnodes, histlen, stride)
+    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
+    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
     if os.path.exists(cache_path1) and os.path.exists(cache_path2):
         cache = True
-        trainrefs = np.loadtxt(cache_path1, dtype=str)
-        trainrefs = list(zip(trainrefs[:,0], trainrefs[:,1].astype(int)))
-        testrefs = np.loadtxt(cache_path2, dtype=str)
-        testrefs = list(zip(testrefs[:,0], testrefs[:,1].astype(int)))
+        trainrefs = read_refs(cache_path1)
+        testrefs = read_refs(cache_path2)
     
     for fpath in tqdm(flist, desc='Reading for {}-NN'.format(numnodes)):
         
-        fieldeggid = os.path.basename(fpath).split('_')[2]
+        df = read_knn(fpath, version)
+        monitorid = df.columns[0]
+        df.rename({monitorid:'target'}, axis='columns', inplace=True)
         
-        df = pd.read_csv(fpath, index_col=[0])
-        df.rename({fieldeggid:'target'}, axis='columns', inplace=True)
-        
-        # create new dataframe with MultiIndex (fieldeggid, index) for
+        # create new dataframe with MultiIndex (monitorid, index) for
         # quick indexing while creating batches during training
         df_reind = pd.DataFrame(data=df.values,
-                                index=pd.MultiIndex.from_product([[fieldeggid], df.index], names=('fieldeggid', 'ref')),
+                                index=pd.MultiIndex.from_product([[monitorid], df.index], names=('monitorid', 'ref')),
                                 columns=df.columns)
-        
-        # some normalizations
-        df_reind.iloc[:,0] /= 100.0
-        
-        if version == 'v1':
-            df_reind.iloc[:, 1:] /= 100.0
-        else:
-            df_reind.iloc[:, 1::3] /= 100.0
-            df_reind.iloc[:, 2::3] /= 1000.0
-            df_reind.iloc[:, 3::3] /= 100.0
-        
         dfs_list.append(df_reind)
         
         # get trainrefs and testrefs if not already cached -- valid
         # indices from which contiguous blocks of 'histlen' length of
         # data are available
         if not cache:
-            validinds = []
-            for tii in range(0, df_reind.shape[0]-histlen, stride):
+            # split into train and test
+            test_begin = int(df_reind.shape[0] * split)
+            
+            traininds = []
+            for tii in range(0, test_begin-histlen, stride):
                 if not df_reind.iloc[tii:tii+histlen,:].isnull().any(axis=None):
-                    validinds.append(tii)
-            validinds = np.asarray(validinds)
+                    traininds.append(tii)
             
-            # get approximate split of indices, renaming 'len_train'
-            # to 'test_begin'
-            test_begin = int(split * len(validinds))
-            if test_begin == 0:
-                continue
+            testinds = []
+            for tii in range(test_begin, df_reind.shape[0]-histlen, stride):
+                if not df_reind.iloc[tii:tii+histlen,:].isnull().any(axis=None):
+                    testinds.append(tii)
             
-            # train and test regions may overlap because of 'histlen',
-            # hence adjust the split correctly so that no index+histlen
-            # region of train data is in the test data
-            train_end = test_begin - 1
-            while train_end > 0 and validinds[train_end] + histlen <= test_begin:
-                train_end -= 1
+            traininds = np.asarray(traininds)
+            testinds = np.asarray(testinds)
             
-            if validinds[train_end] + histlen <= test_begin:
-                # basically no split is possible without train and
-                # test regions overlapping
-                continue
-            
-            traininds, testinds = validinds[:train_end+1], validinds[test_begin:]
-            trainrefs.extend([(fieldeggid, ind) for ind in traininds])
-            testrefs.extend([(fieldeggid, ind) for ind in testinds])
+            trainrefs.extend([(monitorid, ind) for ind in traininds])
+            testrefs.extend([(monitorid, ind) for ind in testinds])
     
     if not cache:
-        np.savetxt(cache_path1, trainrefs, fmt='%s')
-        np.savetxt(cache_path2, testrefs, fmt='%s')
+        save_refs(cache_path1, trainrefs)
+        save_refs(cache_path2, testrefs)
     
-    df_all = pd.concat(dfs_list, axis=0)
+    df_all = pd.concat(dfs_list, axis=0, sort=True)
     return df_all, trainrefs, testrefs
 
 
@@ -572,18 +576,18 @@ def knodes_batch(dataset, batch_refs, histlen=32, mode='train', pad=30):
 
 
 def batch_knn(dataset_df, batchrefs, histlen):
-
+    
     labels = np.zeros((len(batchrefs), histlen))
     batch = np.zeros((len(batchrefs), dataset_df.shape[1]-1, histlen))
-
+    
     for rii, ref in enumerate(batchrefs):
-        fieldeggid, start = ref
-        dataset_df_batch = dataset_df.loc[(fieldeggid, slice(None)), :].iloc[start:start+histlen]
+        monitorid, start = ref
+        dataset_df_batch = dataset_df.loc[(monitorid, slice(None)), :].iloc[start:start+histlen]
         batch[rii, :, :] = dataset_df_batch.iloc[:,1:].values.T
         labels[rii, :] = dataset_df_batch.iloc[:,0].values
     
     return batch, labels
-    
+
 
 def nextval_batch(datamat, target, inds, history=5):
 	'''
