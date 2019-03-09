@@ -549,7 +549,7 @@ def create_dataset_knn(source, sensor, numnodes, version, stride=1, histlen=32, 
         save_refs(cache_path1, trainrefs)
         save_refs(cache_path2, testrefs)
     
-    df_all = pd.concat(dfs_list, axis=0, sort=True)
+    df_all = pd.concat(dfs_list, axis=0, sort=False, copy=False)
     return df_all, trainrefs, testrefs
 
 
@@ -582,7 +582,7 @@ def batch_knn(dataset_df, batchrefs, histlen):
     
     for rii, ref in enumerate(batchrefs):
         monitorid, start = ref
-        dataset_df_batch = dataset_df.loc[(monitorid, slice(None)), :].iloc[start:start+histlen]
+        dataset_df_batch = dataset_df.loc[(monitorid, slice(None)), :].iloc[start:start+histlen,:]
         batch[rii, :, :] = dataset_df_batch.iloc[:,1:].values.T
         labels[rii, :] = dataset_df_batch.iloc[:,0].values
     
