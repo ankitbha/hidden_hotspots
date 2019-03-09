@@ -22,14 +22,15 @@ def prettyprint_args(ns, outfile=sys.stdout):
     print(file=outfile)
     return
 
-def frac(arg):
+
+def frac_type(arg):
     try:
         val = float(arg)
         if val <= 0 or val >= 1:
             raise ValueError
     except ValueError:
         raise argparse.ArgumentTypeError('train-test split should be in (0,1)')
-    return
+    return val
 
 
 def train(K, args, logfile=None):
@@ -171,7 +172,7 @@ if __name__=='__main__':
     parser.add_argument('--hidden', type=int, default=256, help='Hidden layer size')
     parser.add_argument('--lr', type=float, default=5e-4, help='Learning rate')
     parser.add_argument('--epochs', type=int, default=120, help='Number of epochs for training')
-    parser.add_argument('--split', type=frac, default=0.8, help='Train-test split fraction')
+    parser.add_argument('--split', type=frac_type, default=0.8, help='Train-test split fraction')
     parser.add_argument('--max-batches', type=int, help='Max number of batches')
     parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
     args = parser.parse_args()
