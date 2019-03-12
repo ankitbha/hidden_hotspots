@@ -545,7 +545,84 @@ def create_dataset_knn(source, sensor, numnodes, version, stride=1, histlen=32, 
             trainrefs.extend([(monitorid, ind) for ind in traininds])
             testrefs.extend([(monitorid, ind) for ind in testinds])
     
-    if not cache:
+    if not cache and len(flist) > 0:
+        save_refs(cache_path1, trainrefs)
+        save_refs(cache_path2, testrefs)
+    
+    df_all = pd.concat(dfs_list, axis=0, sort=False, copy=False)
+    return df_all, trainrefs, testrefs
+
+
+def create_dataset_knn_testdays(source, sensor, numnodes, version, testdaysfilepath, stride=1, histlen=32):
+    
+    '''Retrieve data for a value of K, and split into train-test based on
+    a fixed custom set of days set apart for testing. Also return the
+    indices for training in each file (read from cache, else cache it
+    and return it)
+    
+    '''
+    from tqdm import tqdm
+    
+    pathgen = None
+    if version == 'v1':
+        pathgen = 'datasets/knn_{}_{}/knn_{}_*_K{:02d}.csv'.format(version, source, sensor, numnodes)
+    else:
+        pathgen = 'datasets/knn_{}_{}/knn_{}disttheta_*_K{:02d}.csv'.format(version, source, sensor, numnodes)
+    
+    flist = glob(pathgen)
+    
+    dfs_list = []
+    trainrefs = []
+    testrefs = []
+    cache = False
+    
+    testsetname = os.path.basename(testdaysfilepath).split('_')[2]
+    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}_testdays_{}.txt'.format(source, sensor, numnodes, histlen, stride, testsetname)
+    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}_testdays_{}.txt'.format(source, sensor, numnodes, histlen, stride, testsetname)
+    
+    if os.path.exists(cache_path1) and os.path.exists(cache_path2):
+        cache = True
+        trainrefs = read_refs(cache_path1)
+        testrefs = read_refs(cache_path2)
+    else:
+        testdays = set(np.loadtxt(testdaysfilepath, delimiter=',', skiprows=1, usecols=[0], dtype=str))
+    
+    for fpath in tqdm(flist, desc='Reading for {}-NN'.format(numnodes)):
+        
+        df = read_knn(fpath, version)
+        monitorid = df.columns[0]
+        
+        # get trainrefs and testrefs if not already cached -- valid
+        # indices from which contiguous blocks of 'histlen' length of
+        # data are available
+        if not cache:
+            traininds = []
+            testinds = []
+            for tii in range(0, df.shape[0]-histlen, stride):
+                section = df.iloc[tii:tii+histlen,:]
+                if not section.isnull().any(axis=None):
+                    day_start = section.index[0][:10]
+                    day_end = section.index[-1][:10]
+                    if (day_start == day_end) and (day_start in testdays):
+                        testinds.append(tii)
+                    elif (day_start not in testdays) and (day_end not in testdays):
+                        traininds.append(tii)
+            
+            traininds = np.asarray(traininds)
+            testinds = np.asarray(testinds)
+            
+            trainrefs.extend([(monitorid, ind) for ind in traininds])
+            testrefs.extend([(monitorid, ind) for ind in testinds])
+        
+        # create new dataframe with MultiIndex (monitorid, index) for
+        # quick indexing while creating batches during training
+        df.rename({monitorid:'target'}, axis='columns', inplace=True)
+        df_reind = pd.DataFrame(data=df.values,
+                                index=pd.MultiIndex.from_product([[monitorid], df.index], names=('monitorid', 'ref')),
+                                columns=df.columns)
+        dfs_list.append(df_reind)
+    
+    if not cache and len(flist) > 0:
         save_refs(cache_path1, trainrefs)
         save_refs(cache_path2, testrefs)
     

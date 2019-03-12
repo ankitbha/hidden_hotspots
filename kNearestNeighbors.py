@@ -196,9 +196,10 @@ if __name__=='__main__':
     else:
         os.makedirs(savedir)
     
+    #df = pd.read_csv(args.datafilepath, usecols=[0,1,4,5,6], index_col=[0,1], parse_dates=True)
     df = pd.read_csv(args.datafilepath, index_col=[0,1], parse_dates=True)
-    df.tz_localize('UTC', level=1, copy=False)
-    df.tz_convert('Asia/Kolkata', level=1, copy=False)
+    # df.tz_localize('UTC', level=1, copy=False)
+    # df.tz_convert('Asia/Kolkata', level=1, copy=False)
     
     monitorids_list = df.index.levels[0]
     

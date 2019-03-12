@@ -3,13 +3,14 @@ import os
 import sys
 import argparse
 import random
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 
-from datasets import create_dataset_knn, batch_knn
+from datasets import create_dataset_knn, create_dataset_knn_testdays, batch_knn
 from nets import Series
 from torch.autograd import Variable
 
@@ -44,16 +45,20 @@ def train(K, args, logfile=None):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    dataset_df, trainrefs, testrefs = create_dataset_knn(args.source, args.sensor, K, args.knn_version, 
-                                                         args.stride, args.histlen, args.split)
-    
+    if args.testdays == None:
+        dataset_df, trainrefs, testrefs = create_dataset_knn(args.source, args.sensor, K, args.knn_version, 
+                                                             args.stride, args.histlen, args.split)
+    else:
+        dataset_df, trainrefs, testrefs = create_dataset_knn_testdays(args.source, args.sensor, K, args.knn_version, 
+                                                                      args.testdays, args.stride, args.histlen)
+        
     if args.knn_version == 'v1':
-        model = Series(batchsize=args.batch,
+        model = Series(batchsize=args.batchsize,
                        historylen=args.histlen,
                        numsegments=K + 1,
                        hiddensize=args.hidden).to(device).double()
     else:
-        model = Series(batchsize=args.batch,
+        model = Series(batchsize=args.batchsize,
                        historylen=args.histlen,
                        numsegments=3*K + 1,
                        hiddensize=args.hidden).to(device).double()
@@ -66,16 +71,18 @@ def train(K, args, logfile=None):
         random.shuffle(trainrefs)
         
         losses = []
-        nBatches = len(trainrefs)//args.batch
-        for bii in range(0, len(trainrefs) - args.batch, args.batch):
+        nBatches = math.ceil((len(trainrefs) - args.batchsize) / args.batchsize)
+        batchcount = 0
+        
+        for bii in range(0, len(trainrefs) - args.batchsize, args.batchsize):
             
-            batchcount = bii//args.batch
             if batchcount == args.max_batches:
                 break
+            batchcount += 1
             
             model.train()
             
-            batchrefs = trainrefs[bii:bii+args.batch]
+            batchrefs = trainrefs[bii:bii+args.batchsize]
             # batch_seq, batch_lbls = knodes_batch(dataset, batchrefs, pad=10)
             batch_seq, batch_lbls = batch_knn(dataset_df, batchrefs, args.histlen)
             
@@ -89,35 +96,36 @@ def train(K, args, logfile=None):
             
             loss = criterion(preds, batch_lbls)
             losses.append(loss.item())
-            n_iter = eii*(nBatches)+bii
+            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
             disp_string = '[E:{}/{}] B:{}/{}  loss: {:.2f}\n'.format(
                 eii+1, args.epochs,
-                batchcount+1, nBatches,
+                batchcount, nBatches,
                 loss.item() * 100.0**2)
             sys.stdout.write(disp_string)
             
             if logfile != None:
                 logfile.write(disp_string)
         
-        nBatches = len(testrefs)//args.batch
+        nBatches = math.ceil((len(testrefs) - args.batchsize) / args.batchsize)
+        batchcount = 0
         tloss = 0
         tmape = 0
         
-        for bii in range(0, len(testrefs) - args.batch, args.batch):
+        for bii in range(0, len(testrefs) - args.batchsize, args.batchsize):
+            
+            if batchcount == args.max_batches:
+                break
+            batchcount += 1
             
             sys.stdout.write('\r')
             
-            batchcount = bii//args.batch
-            if batchcount == args.max_batches:
-                break
-            
             model.eval()
             
-            batchrefs = testrefs[bii:bii+args.batch]
+            batchrefs = testrefs[bii:bii+args.batchsize]
             # batch_seq, batch_lbls = knodes_batch(dataset, batchrefs, mode='test', pad=10)
             batch_seq, batch_lbls = batch_knn(dataset_df, batchrefs, args.histlen)
             
@@ -136,16 +144,16 @@ def train(K, args, logfile=None):
             batch_lbls[batch_lbls == 0] = 0.01
             tmape += np.mean(np.abs((preds - batch_lbls) / batch_lbls))
             
-            disp_string = 'Testing {}/{}'.format(batchcount+1, nBatches)
+            disp_string = 'Testing {}/{}'.format(batchcount, nBatches)
             sys.stdout.write(disp_string)
             sys.stdout.flush()
         
         logfile.write(disp_string)
         logfile.flush()
         
-        tmape /= nBatches
+        tmape /= batchcount
         tmape *= 100.0
-        tloss /= nBatches
+        tloss /= batchcount
         disp_string = '\n   Testing Loss:  {:.3f}      Testing MAPE: {:.1f}% \n'.format(tloss * 100.0**2, tmape)
         sys.stdout.write(disp_string)
         
@@ -168,18 +176,22 @@ if __name__=='__main__':
     parser.add_argument('knn_version', choices=('v1', 'v2'), help='Version 1 or 2')
     parser.add_argument('--history', type=int, default=32, dest='histlen', help='Length of history')
     parser.add_argument('--stride', type=int, default=1, help='Length of stride through data')
-    parser.add_argument('--batch', type=int, default=32, help='Batch size')
+    parser.add_argument('--batchsize', type=int, default=32, help='Batch size')
     parser.add_argument('--hidden', type=int, default=256, help='Hidden layer size')
     parser.add_argument('--lr', type=float, default=5e-4, help='Learning rate')
     parser.add_argument('--epochs', type=int, default=120, help='Number of epochs for training')
-    parser.add_argument('--split', type=frac_type, default=0.8, help='Train-test split fraction')
+
+    megroup = parser.add_mutually_exclusive_group()
+    megroup.add_argument('--split', type=frac_type, default=0.8, help='Train-test split fraction')
+    megroup.add_argument('--testdays', help='File containing test days (\'split\' is ignored)')
+    
     parser.add_argument('--max-batches', type=int, help='Max number of batches')
     parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
     args = parser.parse_args()
     
     # confirm before beginning execution
     prettyprint_args(args)
-    
+
     if not args.yes:
         confirm = input('Proceed? (y/n) ')
         if confirm.strip().lower() != 'y':
