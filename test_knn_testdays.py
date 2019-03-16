@@ -216,7 +216,7 @@ if __name__=='__main__':
             
             # simple baselines
             invdists = 1 / np.array([tup[1] for tup in dists_bearings_list])
-            inpdata = dataset_knn[:,1:] if args.knn_version == 'v1' else dataset_knn[:,1::3]
+            inpdata = dataset_knn[:,1:] / (invdists**2 * 1e7) if args.knn_version == 'v1' else dataset_knn[:,1::3]
             inpdata = np.ma.masked_invalid(inpdata)
             y_pred_bl1 = inpdata.mean(axis=1) * 100.0
             y_pred_bl2 = np.average(inpdata, axis=1, weights=invdists) * 100.0
