@@ -3,6 +3,31 @@
 import numpy as np
 
 
+# extract contiguous portions for an arrays
+def contiguous(arr):
+    valids = ~np.isnan(arr)
+    
+    count = 0
+    startind = 0
+    state = False
+    
+    for ind, ele in enumerate(valids):
+        if state:
+            if ele:
+                count += 1
+            else:
+                state = False
+                yield arr[startind:startind+count], np.arange(startind, startind+count)
+                count = 0
+        else:
+            if ele:
+                state = True
+                startind = ind
+                count = 1
+
+    yield arr[startind:startind+count], np.arange(startind, startind+count)
+
+
 # extract largest contiguous portion for list of arrays
 def extract_contiguous(arr_list):
 
