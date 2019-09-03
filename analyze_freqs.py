@@ -11,13 +11,13 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from scipy import fftpack
+#from scipy import fftpack
 #from itertools import chain
 
 import utils
 
 
-def compute_spectra(df, ntop=100):
+def compute_spectra(df, sensor, ntop=100):
     '''
     Compute spectrum for each contiguous region for each sensor.
     '''
@@ -53,12 +53,26 @@ def compute_spectra(df, ntop=100):
             start_time, end_time = block.index[0], block.index[-1]
 
             y = block.values
-            freqs = fftpack.rfftfreq(N) * f_s
-            Y = fftpack.rfft(y) / N
+
+            # np.fft.rfft returns a complex array, which is the
+            # correct representation. The output of fftpack.rfft is a
+            # bit more confusing and harder to deal with.
+            freqs = np.fft.rfftfreq(N) * f_s
+            Y = np.fft.rfft(y)
+
+            # compute magnitude and argument for each freq
+            Ymag = np.absolute(Y)
+            Yarg = np.angle(Y, deg=True)
 
             # sort the freq components by magnitude and apply filter
-            Y_df = pd.DataFrame(np.hstack((freqs[:,np.newaxis], Y[:,np.newaxis], np.abs(Y[:,np.newaxis]))), columns=['freqs', 'dft', 'dft_abs'])
-            Y_filter_df = Y_df.sort_values('dft_abs', ascending=False)
+            #Y_df = pd.DataFrame([freqs[:,np.newaxis], Y[:,np.newaxis], Ymag[:,np.newaxis], Yarg[:,np.newaxis]], columns=['freqs', 'dft', 'dft_mag', 'dft_arg_deg'])
+            Y_df = pd.DataFrame(list(zip(freqs, Y, Ymag, Yarg)), columns=['freqs', 'dft', 'dft_mag', 'dft_arg_deg'])
+            # Y_df = pd.DataFrame(columns=['freqs', 'dft', 'dft_mag', 'dft_arg_deg'])
+            # Y_df.freqs = freqs
+            # Y_df.dft = Y
+            # Y_df.dft_mag = Ymag
+            # Y_df.dft_arg_deg = Yarg
+            Y_filter_df = Y_df.sort_values('dft_mag', ascending=False)
             topfreqs = Y_filter_df.freqs.values
             with np.errstate(divide='ignore'):
                 topperiods = 1/topfreqs
@@ -66,9 +80,10 @@ def compute_spectra(df, ntop=100):
             #dft_cumsum_frac = Y_filter_df.dft_abs.cumsum() / Y_filter_df.dft_abs.sum()
             #N_TOP = sum(dft_cumsum_frac <= N_TOP_FRAC)
 
-            Y_filter_df.loc[Y_filter_df.index[N_TOP:], ['dft', 'dft_abs']] = 0
+            Y_filter_df.loc[Y_filter_df.index[N_TOP:], ['dft', 'dft_mag', 'dft_arg_deg']] = 0
             Y_filter_df.sort_index(inplace=True)
-            y_filter_recon = fftpack.irfft(Y_filter_df.dft.values * N)
+            Y_filter = Y_filter_df.dft.values
+            y_filter_recon = np.fft.irfft(Y_filter, N)
             block_filter_recon = pd.Series(y_filter_recon, index=block.index, name=sensor + ' recon (N_TOPFREQS = {}/{})'.format(N_TOP,N))
 
             print(mid, 'Start:', start_time, 'End:', end_time, 'Length:', N)
@@ -79,7 +94,7 @@ def compute_spectra(df, ntop=100):
             block_filter_recon.plot(c='r', ls='--', ax=axs[0])
             # axs[0].plot(freqs, y, 'k-', freqs, y_filter_recon, 'r--')
             axs[0].legend(loc=0, ncol=2, fontsize='small')
-            axs[1].stem(freqs[1:], np.abs(Y[1:]))
+            axs[1].stem(freqs[1:], Ymag[1:])
             axs[1].set_xlabel('Freq (cycles per day)')
             axs[1].set_ylabel('Magnitude of freq component')
             axs[1].set_title('Spectrum')
@@ -91,24 +106,37 @@ def compute_spectra(df, ntop=100):
             plt.close(fig)
 
             block.to_csv('figures/{}_{}_{:03d}_T.csv'.format(mid, sensor, count), header=True)
-            Y_df.to_csv('figures/{}_{}_{:03d}_DFT.csv'.format(mid, sensor, count), columns=['freqs', 'dft'], index=False)
+            Y_df.sort_values('dft_mag', ascending=False, inplace=True)
+            Y_df.to_csv('figures/{}_{}_{:03d}_DFT.csv'.format(mid, sensor, count), columns=['freqs', 'dft_mag', 'dft_arg_deg'], index=False, float_format='%.4f')
             
             fout.write('{},{},{},{},{},[{}]\n'.format(mid, sensor, start_time, end_time, N, ' '.join(['{:.5f}'.format(per) for per in topperiods[1:N_TOP+1]])))
+    
 
     fout.close()
     
     return
 
 
-def filter_data(filt_type):
+def filter_data(filter_type):
     '''
     Low-pass or high-pass filter.
     '''
-    return
     
+    freqs_df = pd.read_csv('freqs_new.txt')
+    l = []
+
+    for ind in range(freqs_df.shape[0]):
+        arr = freqs_df.loc[ind, 'Top Periods']
+        l.append(np.array(eval(arr.replace(' ', ','))).round(1))
+    
+    freqs_df['top_periods'] = l
+    freqs_df.drop('Top Periods', axis=0, inplace=True)
+    
+    return
+
 
 if __name__ == '__main__':
-    sensor = 'pm25'
+    
     f_s = 96
     
     #plt.style.use('seaborn')
@@ -118,6 +146,4 @@ if __name__ == '__main__':
     #df1 = pd.read_csv('data/kaiterra_fieldeggid_15min_{}_panel.csv'.format(suffix), index_col=[0,1], parse_dates=True)
     #df2 = pd.read_csv('data/govdata/govdata_15min_panel.csv', index_col=[0,1], parse_dates=True)
     #df = pd.concat([df1, df2], axis=0, sort=False, copy=False)
-    #compute_spectra(df)
-
-    
+    #compute_spectra(df, 'pm25')
