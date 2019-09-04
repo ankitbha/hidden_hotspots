@@ -6,7 +6,7 @@
 #
 # ********************************************************************
 
-import glob
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -87,7 +87,10 @@ def compute_spectra(df, sensor, ntop=100):
             block_filter_recon = pd.Series(y_filter_recon, index=block.index, name=sensor + ' recon (N_TOPFREQS = {}/{})'.format(N_TOP,N))
 
             print(mid, 'Start:', start_time, 'End:', end_time, 'Length:', N)
-
+            
+            #plt.style.use('seaborn')
+            plt.rc('font', size=28)
+            
             fig, axs = plt.subplots(2, 1, figsize=(20,20))
             fig.suptitle('{}, {}, {} to {}'.format(mid, sensor, start_time, end_time))
             block.plot(c='k', ls='-', ax=axs[0])
@@ -99,12 +102,14 @@ def compute_spectra(df, sensor, ntop=100):
             axs[1].set_ylabel('Magnitude of freq component')
             axs[1].set_title('Spectrum')
             axs[1].set_xlim(0, f_s/2)
-
+            
             fig.subplots_adjust(bottom=0.2)
             fig.savefig('figures/{}_{}_{:03d}_DFT.png'.format(mid, sensor, count))
-
+            
             plt.close(fig)
 
+            plt.rcdefaults()
+            
             block.to_csv('figures/{}_{}_{:03d}_T.csv'.format(mid, sensor, count), header=True)
             Y_df.sort_values('dft_mag', ascending=False, inplace=True)
             Y_df.to_csv('figures/{}_{}_{:03d}_DFT.csv'.format(mid, sensor, count), columns=['freqs', 'dft_mag', 'dft_arg_deg'], index=False, float_format='%.4f')
@@ -117,7 +122,50 @@ def compute_spectra(df, sensor, ntop=100):
     return
 
 
+def bin_freqs(nbins=10):
+    '''Bin all the top frequencies so we can use the buckets now instead
+    of actual freq values, because the freq values are approximate.'''
+
+    dft_df = pd.read_csv('freqs_new.txt')
+    allfreqs_list = []
+    
+    for ind in range(dft_df.shape[0]):
+        arr = dft_df.loc[ind, 'Top Periods']
+        allfreqs_list.extend(eval(arr.replace(' ', ',')))
+
+    print('Total number of freqs:', len(allfreqs_list))
+
+    plt.style.use('seaborn')
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    fig.suptitle('All top 100 freq components')
+    
+    allfreqs_unique_list = sorted(set(allfreqs_list))
+    print('Total number of unique freqs:', len(allfreqs_unique_list))
+    #ax1.stem(allfreqs_unique_list, use_line_collection=True)
+    ax1.plot(allfreqs_unique_list, np.ones(len(allfreqs_unique_list)), 'r.')
+    ax1.set_yticks([])
+    ax1.tick_params(top=0, bottom=0, labeltop=0, labelbottom=0)
+    
+    hist, bins, _ = ax2.hist(allfreqs_unique_list, bins=nbins)
+    binpairs = np.vstack((bins[:-1], bins[1:])).T
+    print('Non zero bin pairs and bin counts:')
+    print(binpairs[hist>0,:].round(4))
+    print(hist[hist>0])
+    ax2.set_xlabel('Freq component from DFT')
+    ax2.set_ylabel('Bin count')
+    
+    plt.show()
+    
+    plt.close(fig)
+    
+    plt.rcdefaults()
+    
+    return
+    
+
 def filter_data(filter_type):
+
     '''
     Low-pass or high-pass filter.
     '''
@@ -139,11 +187,10 @@ if __name__ == '__main__':
     
     f_s = 96
     
-    #plt.style.use('seaborn')
-    plt.rc('font', size=28)
-    
     #suffix = '2019_Feb_28'
     #df1 = pd.read_csv('data/kaiterra_fieldeggid_15min_{}_panel.csv'.format(suffix), index_col=[0,1], parse_dates=True)
     #df2 = pd.read_csv('data/govdata/govdata_15min_panel.csv', index_col=[0,1], parse_dates=True)
     #df = pd.concat([df1, df2], axis=0, sort=False, copy=False)
     #compute_spectra(df, 'pm25')
+
+    bin_freqs(100)
