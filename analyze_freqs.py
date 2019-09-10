@@ -189,23 +189,200 @@ def bin_topperiods(thres, filter_type='low', nbins=10):
     plt.rcdefaults()
     
     return
+
+
+def bin_freqs(inpdir, sensor, n_bins=10, savedir=None):
+
+    if savedir is None:
+        outpath = os.path.join(inpdir, 'allfreqs_{}_{}_hist.csv'.format(sensor, n_bins))
+    else:
+        outpath = os.path.join(savedir, 'allfreqs_{}_{}_hist.csv'.format(sensor, n_bins))
+        
+    if os.path.exists(outpath):
+        table = np.genfromtxt(outpath, delimiter=',', skip_header=1)
+        bins = table[:,0]
+        hist = table[1:,1]
+        return bins, hist
     
+    dftpathlist = glob.glob(os.path.join(inpdir, '*_{}_*_DFT.csv'.format(sensor)))
+    dftpathlist.sort()
+    
+    allfreqs = set()
+    
+    for dftpath in tqdm(dftpathlist):
+        freqs = np.loadtxt(dftpath, delimiter=',', skiprows=1, usecols=[0])
+        allfreqs.update(freqs)
 
-def filter_data(filter_type):
+    allfreqs = np.array(sorted(allfreqs))
 
+    plt.figure()
+    hist, bins, _ = plt.hist(allfreqs, bins=n_bins)
+    binpairs = np.vstack((bins[:-1], bins[1:])).T
+    
+    print(os.linesep + 'Non zero bin pairs and bin counts:', sum(hist>0))
+    binpairs_pos = binpairs[hist>0,:]
+    hist_pos = hist[hist>0]
+    hist_pos_cumsum = hist_pos.cumsum()
+    print('{:>10}{:>10}{:>10}{:>10}{:>10}'.format('Bin beg', 'Bin end', 'Bincount', 'Cumcount', 'Cumfrac'))
+    for (bin_beg, bin_end), bincount, cumcount, cumfrac in zip(binpairs_pos, hist_pos, hist_pos_cumsum, hist_pos_cumsum/hist_pos.sum()):
+        print('{:10.4f}{:10.4f}{:10.0f}{:10.0f}{:10.6f}'.format(bin_beg, bin_end, bincount, cumcount, cumfrac))
+    
+    print(os.linesep + 'Zero bin pairs:', sum(hist==0))
+    print('{:>10}{:>10}'.format('Bin beg', 'Bin end'))
+    for bin_beg, bin_end in binpairs[hist==0,:]:
+        print('{:10.4f}{:10.4f}'.format(bin_beg, bin_end))
+    
+    plt.xlabel('Freq component from DFT (cycles per day)')
+    plt.ylabel('Bin count')
+
+    plt.savefig(outpath.replace('csv', 'png'))
+    
+    plt.show()
+    
+    plt.close()
+
+    with open(outpath, 'w') as fout:
+        fout.write('bins,hist' + os.linesep)
+        np.savetxt(fout, np.array([[bins[0],np.nan]]), delimiter=',', fmt='%f')
+        np.savetxt(fout, np.vstack((bins[1:],hist)).T, delimiter=',', fmt='%f')
+    
+    return bins, hist
+
+
+def filter_plot_single(ypath, dftpath, sensor, thres, bins, disp=True, save=False):
+
+    y_df = pd.read_csv(ypath)
+    y = y_df[sensor].values
+    
+    dft_df = pd.read_csv(dftpath, index_col=0)
+    dft_df.sort_index(inplace=True)
+
+    dft_df_lp = dft_df.copy(deep=True)
+    dft_df_hp = dft_df.copy(deep=True)
+    
+    dft_df_lp.loc[dft_df.index > thres,:] = 0
+    dft_df_hp.loc[((dft_df.index < thres) & (dft_df.index != 0)),:] = 0
+
+    freqs_lp = dft_df.index.values[((dft_df.index.values <= thres) & (dft_df.index.values != 0))]
+    freqs_hp = dft_df.index.values[dft_df.index.values >= thres]
+    n_lp = len(freqs_lp)
+    n_hp = len(freqs_hp)
+
+    if disp:
+        print('No of low freq components:', n_lp)
+        print('No of high freq components:', n_hp)
+
+    dft_lp = dft_df_lp.dft_mag * np.exp(1j * (dft_df_lp.dft_arg_deg * np.pi / 180))
+    dft_hp = dft_df_hp.dft_mag * np.exp(1j * (dft_df_hp.dft_arg_deg * np.pi / 180))
+    
+    y_lp = np.fft.irfft(dft_lp.values, y.size)
+    y_hp = np.fft.irfft(dft_hp.values, y.size)
+    
+    rmse_lp = np.sqrt(np.mean((y_lp - y)**2))
+    mape_lp = np.mean(np.abs((y_lp - y) / np.ma.masked_invalid(y))) * 100
+    
+    rmse_hp = np.sqrt(np.mean((y_hp - y)**2))
+    mape_hp = np.mean(np.abs((y_hp - y) / np.ma.masked_invalid(y))) * 100
+    
+    if disp:
+        print('Low pass approximation -- RMSE: {:.2f} ug/m^3, MAPE: {:.2f} %'.format(rmse_lp, mape_lp))
+        print('High pass approximation -- RMSE: {:.2f} ug/m^3, MAPE: {:.2f} %'.format(rmse_hp, mape_hp))
+
+    # plot filtered signals
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True, figsize=(8,8))
+    ax1.plot(y, label='Raw signal')
+    ax1.plot(y_lp, 'r--', label='Low pass')
+    
+    ax2.plot(y, label='Raw signal')
+    ax2.plot(y_hp, 'y--', label='High pass')
+    
+    fig.suptitle('Threshold = {} cycles per day'.format(thres), fontsize='medium')
+    
+    ax1.set_title(r'Low pass filter, # components {}, RMSE {:.2f} $\mu g/m^3$, MAPE {:.2f} %'.format(n_lp, rmse_lp, mape_lp), fontsize='small')
+    ax1.set_ylabel(sensor + r' conc ($\mu g/m^3$)')
+    ax1.legend(ncol=2, fontsize='small')
+    
+    ax2.set_title(r'High pass filter, # components {}, RMSE {:.2f} $\mu g/m^3$, MAPE {:.2f} %'.format(n_hp, rmse_hp, mape_hp), fontsize='small')
+    ax2.set_ylabel(sensor + r' conc ($\mu g/m^3$)')
+    ax2.legend(ncol=2, fontsize='small')
+    
+    ax2.set_xlabel('Time (15 min intervals)')
+    
+    if save:
+        y_filter_df = y_df.copy(deep=False)
+        y_filter_df[sensor + '_lowpass'] = y_lp
+        y_filter_df[sensor + '_highpass'] = y_hp
+        saveprefix = ypath[:-4] + '_filter_thres{:02d}CPD'.format(thres)
+        y_filter_df.to_csv(saveprefix + '.csv', index=False)
+        fig.savefig(saveprefix + '.png')
+    
+    # bin the frequencies
+    ind_hp = (bins > thres)
+    bins_hp = bins[ind_hp]
+    
+    ind_lp = ~ind_hp
+    ind_lp[bins == bins_hp[0]] = True
+    bins_lp = bins[ind_lp]
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharey=True, figsize=(8,8))
+    hist_lp, _, _ = ax1.hist(freqs_lp, bins=bins_lp, density=True)
+    ax1.set_xticks(bins_lp)
+    ax1.set_ylim(0, 1)
+    hist_hp, _, _ = ax2.hist(freqs_hp, bins=bins_hp, density=True)
+    #ax2.set_xticks(bins_hp)
+    ax2.set_ylim(0, 1)
+    
+    fig.suptitle('Threshold = {} cycles per day'.format(thres), fontsize='medium')
+    ax1.set_title('Low pass filter, # components {}'.format(n_lp), fontsize='small')
+    ax2.set_title('High pass filter, # components {}'.format(n_hp), fontsize='small')
+    ax1.set_ylabel('Bin prob')
+    ax2.set_ylabel('Bin prob')
+    ax2.set_xlabel('Freq component from DFT (cycles per day)')
+    
+    if save:
+        saveprefix = dftpath[:-4].replace('DFT', 'freqbuckets_filter_thres{:02d}CPD'.format(thres))
+        
+        with open(saveprefix + '_lowpass.csv', 'w') as fout:
+            fout.write('bins,hist' + os.linesep)
+            np.savetxt(fout, np.array([[bins_lp[0],np.nan]]), delimiter=',', fmt='%f')
+            np.savetxt(fout, np.vstack((bins_lp[1:],hist_lp)).T, delimiter=',', fmt='%f')
+        
+        with open(saveprefix + '_highpass.csv', 'w') as fout:
+            fout.write('bins,hist' + os.linesep)
+            np.savetxt(fout, np.array([[bins_hp[0],np.nan]]), delimiter=',', fmt='%f')
+            np.savetxt(fout, np.vstack((bins_hp[1:],hist_hp)).T, delimiter=',', fmt='%f')
+        
+        fig.savefig(saveprefix + '.png')
+    
+    if disp:
+        plt.show()
+    
+    plt.close('all')
+    
+    return
+
+
+def filter_plot(inpdir, sensor, thres, bins, disp=False, save=True):
+
+    '''Low-pass or high-pass filter.
+    
+    inpdir: folder containing csv files
+    
+    thres: threshold for cut-off (for either low-pass or high-pass)
+
+    Low-pass filters out the high freq components, which is usually
+    noise. High-pass filters does the opposite.
+    
     '''
-    Low-pass or high-pass filter.
-    '''
-    
-    freqs_df = pd.read_csv('freqs_new.txt')
-    l = []
 
-    for ind in range(freqs_df.shape[0]):
-        arr = freqs_df.loc[ind, 'Top Periods']
-        l.append(np.array(eval(arr.replace(' ', ','))).round(1))
+    dftpathlist = glob.glob(os.path.join(inpdir, '*_{}_*_DFT.csv'.format(sensor)))
+    dftpathlist.sort()
+    ypathlist = [dftpath.replace('DFT', 'T') for dftpath in dftpathlist]
+
+    n_iters = len(ypathlist)
     
-    freqs_df['top_periods'] = l
-    freqs_df.drop('Top Periods', axis=0, inplace=True)
+    for ypath, dftpath in tqdm(zip(ypathlist, dftpathlist), total=n_iters):
+        filter_plot_single(ypath, dftpath, sensor, thres, bins, disp, save)
     
     return
 
@@ -220,4 +397,36 @@ if __name__ == '__main__':
     #df = pd.concat([df1, df2], axis=0, sort=False, copy=False)
     #compute_spectra(df, 'pm25')
 
-    bin_freqs(100)
+    sensor = 'pm25'
+    
+    inpdir = 'figures/freq_components/location_wise/'
+    
+    # threshold for filtering in cycles per day (frequency unit)
+    thres = 3
+    
+    # binning interval for binning the frequencies
+    n_bins = 100
+    
+    # bin_topperiods(thres, nbins=n_bins)
+    bins, hist = bin_freqs(inpdir, sensor, n_bins, 'figures/freq_components/')
+
+    print('Frequency bins:', bins)
+
+    #dftpathlist = glob.glob(os.path.join(inpdir, '*_{}_*_DFT.csv'.format(sensor)))
+    #dftpath = dftpathlist[np.random.randint(0, len(dftpathlist))]
+    #dftpath = os.path.join(inpdir, '113E_pm25_001_DFT.csv')
+    #dftpath = os.path.join(inpdir, 'EAC8_pm25_008_DFT.csv')
+    #dftpath = os.path.join(inpdir, 'AshokVihar_DPCC_pm25_051_DFT.csv')
+    #dftpath = os.path.join(inpdir, '2E9C_pm25_002_DFT.csv') # this is an interesting one
+    #dftpath = os.path.join(inpdir, 'AyaNagar_IMD_pm25_232_DFT.csv') # this should not be taken seriously since it is of one day
+    #dftpath = os.path.join(inpdir, 'RKPuram_DPCC_pm25_212_DFT.csv') # this is good
+    #dftpath = os.path.join(inpdir, 'AnandVihar_DPCC_pm25_189_DFT.csv') # this is bad when thres=3, indicates temporal hotspot
+    #dftpath = os.path.join(inpdir, 'NSIT_CPCB_pm25_009_DFT.csv') # has 0 values for y
+    #dftpath = os.path.join(inpdir, 'VivekVihar_DPCC_pm25_060_DFT.csv') # another interesting one
+    #dftpath = os.path.join(inpdir, 'Pusa_IMD_pm25_079_DFT.csv')
+    #print(dftpath)
+    
+    #ypath = dftpath.replace('DFT', 'T')
+
+    #filter_plot_single(ypath, dftpath, sensor, thres, bins, disp=False, save=True)
+    filter_plot(inpdir, sensor, thres, bins, disp=False, save=True)
