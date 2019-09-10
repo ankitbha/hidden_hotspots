@@ -7,12 +7,14 @@
 # ********************************************************************
 
 import os
+import glob
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 #from scipy import fftpack
 #from itertools import chain
+from tqdm import tqdm
 
 import utils
 
@@ -22,7 +24,7 @@ def compute_spectra(df, sensor, ntop=100):
     Compute spectrum for each contiguous region for each sensor.
     '''
 
-    fout = open('freqs_new.txt', 'w')
+    fout = open('topperiods_new.txt', 'w')
     fout.write('MID,Sensor,Start,End,Length,Top Periods\n')
 
     #N_TOP_FRAC = 0.8
@@ -122,37 +124,62 @@ def compute_spectra(df, sensor, ntop=100):
     return
 
 
-def bin_freqs(nbins=10):
+def bin_topperiods(thres, filter_type='low', nbins=10):
     '''Bin all the top frequencies so we can use the buckets now instead
     of actual freq values, because the freq values are approximate.'''
-
-    dft_df = pd.read_csv('freqs_new.txt')
-    allfreqs_list = []
+    
+    assert filter_type in ('low', 'high')
+    
+    dft_df = pd.read_csv('topperiods_new.txt')
+    allperiods_list = []
     
     for ind in range(dft_df.shape[0]):
         arr = dft_df.loc[ind, 'Top Periods']
-        allfreqs_list.extend(eval(arr.replace(' ', ',')))
-
-    print('Total number of freqs:', len(allfreqs_list))
-
+        allperiods_list.extend(eval(arr.replace(' ', ',')))
+    
+    print('Total number of freq components:', len(allperiods_list))
+    
     plt.style.use('seaborn')
     
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
     fig.suptitle('All top 100 freq components')
     
-    allfreqs_unique_list = sorted(set(allfreqs_list))
-    print('Total number of unique freqs:', len(allfreqs_unique_list))
-    #ax1.stem(allfreqs_unique_list, use_line_collection=True)
-    ax1.plot(allfreqs_unique_list, np.ones(len(allfreqs_unique_list)), 'r.')
+    allperiods_unique_list = sorted(set(allperiods_list))
+    
+    print('Total number of unique freq components:', len(allperiods_unique_list))
+    
+    # apply threshold
+    print('Threshold:', thres)
+
+    if filter_type == 'low':
+        allperiods_unique_thres_list = list(filter(lambda ele: thres * ele > 1, allperiods_unique_list))
+    else:
+        allperiods_unique_thres_list = list(filter(lambda ele: thres * ele < 1, allperiods_unique_list))
+
+    print('Total number of unique freq components after filtering:', len(allperiods_unique_thres_list))
+    
+    #ax1.stem(allperiods_unique_list, use_line_collection=True)
+    ax1.plot(allperiods_unique_thres_list, np.ones(len(allperiods_unique_thres_list)), 'r.')
     ax1.set_yticks([])
     ax1.tick_params(top=0, bottom=0, labeltop=0, labelbottom=0)
     
-    hist, bins, _ = ax2.hist(allfreqs_unique_list, bins=nbins)
+    hist, bins, _ = ax2.hist(allperiods_unique_thres_list, bins=nbins)
     binpairs = np.vstack((bins[:-1], bins[1:])).T
-    print('Non zero bin pairs and bin counts:')
-    print(binpairs[hist>0,:].round(4))
-    print(hist[hist>0])
-    ax2.set_xlabel('Freq component from DFT')
+    print(os.linesep + 'Non zero bin pairs and bin counts:', sum(hist>0))
+    binpairs_pos = binpairs[hist>0,:]
+    hist_pos = hist[hist>0]
+    hist_pos_cumsum = hist_pos.cumsum()
+    print('{:>10}{:>10}{:>10}{:>10}{:>10}'.format('Bin beg', 'Bin end', 'Bincount', 'Cumcount', 'Cumfrac'))
+    for (bin_beg, bin_end), bincount, cumcount, cumfrac in zip(binpairs_pos, hist_pos, hist_pos_cumsum, hist_pos_cumsum/hist_pos.sum()):
+        print('{:10.4f}{:10.4f}{:10.0f}{:10.0f}{:10.6f}'.format(bin_beg, bin_end, bincount, cumcount, cumfrac))
+    
+    print(os.linesep + 'Zero bin pairs:', sum(hist==0))
+    #print(binpairs[hist>0,:].round(4))
+    #print(hist[hist>0])
+    print('{:>10}{:>10}'.format('Bin beg', 'Bin end'))
+    for bin_beg, bin_end in binpairs[hist==0,:]:
+        print('{:10.4f}{:10.4f}'.format(bin_beg, bin_end))
+    ax2.set_xlabel('Freq component from DFT (time period in days)')
     ax2.set_ylabel('Bin count')
     
     plt.show()
