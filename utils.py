@@ -3,6 +3,31 @@
 import numpy as np
 
 
+
+# do some smoothing
+#
+# moving window smoothing, make the window size variable
+def smooth_series(series, wlen, weights=None):
+    
+    # only odd values of "wlen" supported
+    pad = wlen//2
+    
+    if pad == 0:
+        return series
+    
+    wlen = 2*pad + 1
+    
+    if weights is not None:
+        assert len(weights) == wlen
+    
+    xpad = np.empty(series.size + 2*pad) * np.nan
+    xpad[pad:xpad.size-pad] = series.values
+    xpad = np.ma.masked_invalid(xpad)
+    xsmooth = np.asarray([np.ma.average(xpad[i:i+wlen], weights=weights) for i in range(xpad.size-wlen+1)])
+    series_smooth = pd.Series(index=series.index, data=xsmooth, name=series.name)
+    return series_smooth
+
+
 # extract contiguous portions for an arrays
 def contiguous(arr):
     valids = ~np.isnan(arr)
