@@ -161,7 +161,11 @@ def train(K, args, logfile=None):
             logfile.write(disp_string)
     
     # save the trained model
-    torch.save(model.state_dict(), 'models/model_{}_{}_K{:02d}_{}.pth'.format(args.source, args.sensor, K, args.knn_version))
+    modelsavepath = 'models/knn/model_{}_{}_K{:02d}_{}.pth'.format(args.source, args.sensor, K, args.knn_version)
+    if not os.path.exists(modelsavepath):
+        os.makedirs(os.path.dirname(modelsavepath))
+    torch.save(model.state_dict(), modelsavepath)
+    
     return
 
 
@@ -199,7 +203,17 @@ if __name__=='__main__':
             raise SystemExit()
     
     # begin logging
-    fout = open('output/model_{}_{}_K{:02d}_{}.out'.format(args.source, args.sensor, args.numneighbors, args.knn_version), 'w')
+    savepath = 'output/output_knn/model_{}_{}_K{:02d}_{}.out'.format(args.source, args.sensor, args.numneighbors, args.knn_version)
+    if not os.path.exists(savepath):
+        os.makedirs(os.path.dirname(savepath))
+    else:
+        if not args.yes:
+            confirm = input('Output savepath {} already exists. Overwrite? (y/n) ')
+            if confirm.strip().lower() != 'y':
+                print('Aborting program. Please rename existing file or provide alternate name for saving.')
+                raise SystemExit()
+    
+    fout = open(savepath, 'w')
     prettyprint_args(args, outfile=fout)
     
     train(args.numneighbors, args, logfile=fout)
