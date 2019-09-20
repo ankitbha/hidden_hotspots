@@ -114,10 +114,16 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-# CUSTOM
+# CUSTOM 
+
+# output file formats
+*.pdf
+
+# output folders
 output/
 datasets/
 models/
 plots/
+figures/
 results/
 _archive/
