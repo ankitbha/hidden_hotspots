@@ -16,7 +16,7 @@ import os, sys
 import numpy as np
 import pandas as pd
 import torch
-from configs import *
+#from configs import *
 from glob import glob
 from datetime import datetime, timedelta
 import time
@@ -459,13 +459,10 @@ def create_dataset_knn_sensor(source, monitorid, sensor, numnodes, version, stri
     
     '''
     
-    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
-    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
+    cache_path1 = 'output/train_test_refs/trainrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
+    cache_path2 = 'output/train_test_refs/testrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
     
     if os.path.exists(cache_path1) and os.path.exists(cache_path2):
-        trainrefs = read_refs_monitorid(cache_path1, monitorid)
-        testrefs = read_refs_monitorid(cache_path2, monitorid)
-        
         fpath = None
         if version == 'v1':
             fpath = 'datasets/knn_{}_{}/knn_{}_{}_K{:02d}.csv'.format(version, source, sensor, monitorid, numnodes)
@@ -476,8 +473,11 @@ def create_dataset_knn_sensor(source, monitorid, sensor, numnodes, version, stri
         df.rename({monitorid:'target'}, axis='columns', inplace=True)
     else:
         df_all, trainrefs, testrefs = create_dataset_knn(source, sensor, numnodes, version, stride, histlen, split)
-        df = df_all.loc[(monitorid, slice(None)),:]
+        df = df_all.loc[monitorid,:]
     
+    trainrefs = read_refs_monitorid(cache_path1, monitorid)
+    testrefs = read_refs_monitorid(cache_path2, monitorid)
+
     return df, trainrefs, testrefs
 
 
@@ -502,8 +502,8 @@ def create_dataset_knn(source, sensor, numnodes, version, stride=1, histlen=32, 
     trainrefs = []
     testrefs = []
     cache = False
-    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
-    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
+    cache_path1 = 'output/train_test_refs/trainrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
+    cache_path2 = 'output/train_test_refs/testrefs_{}_{}_K{:02d}_h{}_s{}_f{}.txt'.format(source, sensor, numnodes, histlen, stride, split)
     if os.path.exists(cache_path1) and os.path.exists(cache_path2):
         cache = True
         trainrefs = read_refs(cache_path1)
@@ -577,8 +577,8 @@ def create_dataset_knn_testdays(source, sensor, numnodes, version, testdaysfilep
     cache = False
     
     testsetname = os.path.basename(testdaysfilepath).split('_')[2]
-    cache_path1 = 'output/trainrefs_{}_{}_K{:02d}_h{}_s{}_testdays_{}.txt'.format(source, sensor, numnodes, histlen, stride, testsetname)
-    cache_path2 = 'output/testrefs_{}_{}_K{:02d}_h{}_s{}_testdays_{}.txt'.format(source, sensor, numnodes, histlen, stride, testsetname)
+    cache_path1 = 'output/train_test_refs/trainrefs_{}_{}_K{:02d}_h{}_s{}_testdays_{}.txt'.format(source, sensor, numnodes, histlen, stride, testsetname)
+    cache_path2 = 'output/train_test_refs/testrefs_{}_{}_K{:02d}_h{}_s{}_testdays_{}.txt'.format(source, sensor, numnodes, histlen, stride, testsetname)
     
     if os.path.exists(cache_path1) and os.path.exists(cache_path2):
         cache = True
