@@ -118,6 +118,8 @@ venv.bak/
 
 # output file formats
 *.pdf
+*.ods
+*.json
 
 # output folders
 output/
