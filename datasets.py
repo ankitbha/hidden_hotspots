@@ -407,20 +407,21 @@ def create_dataset_knodes(max_nodes=None, split=0.8, data_version=create_dataset
 	return dataset, train_refs, test_refs
 
 
-def read_knn(fpath, version):
+def read_knn(fpath, version, normalize=True):
     
     df = pd.read_csv(fpath, index_col=[0])
     
     # some normalizations
-    df.iloc[:,0] /= 100.0
+    if normalize:
+        df.iloc[:,0] /= 100.0
+        
+        if version == 'v1':
+            df.iloc[:, 1:] /= 100.0
+        else:
+            df.iloc[:, 1::3] /= 100.0
+            df.iloc[:, 2::3] /= 1000.0
+            df.iloc[:, 3::3] /= 100.0
     
-    if version == 'v1':
-        df.iloc[:, 1:] /= 100.0
-    else:
-        df.iloc[:, 1::3] /= 100.0
-        df.iloc[:, 2::3] /= 1000.0
-        df.iloc[:, 3::3] /= 100.0
-
     return df
 
 
