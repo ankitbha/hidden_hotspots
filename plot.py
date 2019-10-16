@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import glob
+import os
 
 def plot_bars_K_histlen_perf(modelname, quant, source, sensor, knn_version, mid, K=None, histlen=None):
     
@@ -82,13 +83,81 @@ def plot_bars_mid_quant_bestperf(mids_list, source, sensor, knn_version):
     return
 
 
+def plot_scatter_1nn(mid, source, sensor):
+    '''Scatter plot of values from a sensor and its nearest neighbor.'''
+
+    from datasets import read_knn
+
+    fpath = os.path.join('datasets', 'knn_v2_{}'.format(source), 'knn_{}disttheta_{}_K01.csv'.format(sensor, mid))
+    if not os.path.exists(fpath):
+        print(fpath + ' does not exist!')
+        return
+    
+    df = read_knn(fpath, 'v2', False)
+
+    valid_pos = np.isfinite(df[[mid, 'Monitor_01']].values).all(axis=1)
+    n_valid = sum(valid_pos)
+    if n_valid == 0:
+        print('Dataset for {} is empty!'.format(mid))
+        return
+    
+    valid_times = df.index.values[valid_pos]
+    dists = df.Monitor_01_dist.values[valid_pos]
+    dists = (dists - dists.min()) / (dists.max() - dists.min())
+    c_dists = list(zip(dists, dists, np.ones(n_valid) * 0.1, np.ones(n_valid) * 0.6))
+
+    x = df.loc[valid_pos, mid].values
+    y = df.Monitor_01.values[valid_pos]
+
+    from scipy import stats
+    pearsonr, pvalue = stats.pearsonr(x,y)
+    spearmanr = stats.spearmanr(x,y)
+    kendalltau = stats.kendalltau(x,y)
+    
+    # 'Null hypothesis H: The two quantities are NOT correlated at all.'
+    # 
+    # p-value then indicates the probability, when H is true, that the
+    # correlation coefficients of the two quantities is at least as
+    # high as the sample correlation coefficients computed below.
+    print('# points:', len(x))
+    print('Pearson R: {:.2f}, p-value: {:.2f}'.format(pearsonr, pvalue))
+    print('Spearman R: {:.2f}, p-value: {:.2f}'.format(spearmanr.correlation, spearmanr.pvalue))
+    print('Kendall tau: {:.2f}, p-value: {:.2f}'.format(kendalltau.correlation, kendalltau.pvalue))
+    
+    plt.figure()
+    plt.scatter(x, y, c=c_dists, label='n = {}'.format(len(x)))
+    plt.suptitle('{} scatter plot: {} and 1-NN'.format(sensor, mid))
+    plt.title('Pearson {0:.2f} ({1:.2f}), Spearman {2.correlation:.2f} ({2.pvalue:.2f}), Kendall {3.correlation:.2f} ({3.pvalue:.2f})'.format(pearsonr, pvalue, spearmanr, kendalltau))
+    plt.xlabel(r'{} conc at {} ($\mu g/m^3$)'.format(sensor, mid))
+    plt.ylabel(r'{} conc at nearest neighbor ($\mu g/m^3$)'.format(sensor))
+    plt.legend(loc=0)
+    #plt.show()
+    plt.savefig(os.path.join('figures', 'scatter_1nn', source, mid + '.png'))
+    plt.close()
+    
+    return x, y
+
+
 if __name__ == '__main__':
 
-    mids_list = ['CBC7', 'A9BE', 'C0A7', '72CA', 'BC46', '20CA', 'EAC8', '113E', 'E8E4', '603A']
+    # mids_list = ['CBC7', 'A9BE', 'C0A7', '72CA', 'BC46', '20CA', 'EAC8', '113E', 'E8E4', '603A']
+    mids1_list = np.loadtxt('data/kaiterra/kaiterra_fieldeggid_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
+    mids2_list = np.loadtxt('data/govdata/govdata_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
     
     # for mid in mids_list:
     #     for quant in ['reg', 'excLF']:
     #         for modelname in ['glm', 'elastic']:
     #             print(mid, quant, modelname)
     #             plot_bars_K_histlen_perf(modelname, quant, 'kaiterra', 'pm25', 'v2', mid)
-    plot_bars_mid_quant_bestperf(mids_list, 'kaiterra', 'pm25', 'v2')
+
+    # plot_bars_mid_quant_bestperf(mids_list, 'kaiterra', 'pm25', 'v2')
+    
+    for mid in mids1_list:
+        print(mid)
+        plot_scatter_1nn(mid, 'kaiterra', 'pm25')
+        #assert False
+        
+    
+    for mid in mids2_list:
+        print(mid)
+        plot_scatter_1nn(mid, 'govdata', 'pm25')
