@@ -5,6 +5,85 @@ import pandas as pd
 import glob
 import os
 
+
+def plot_cluster_freqbuckets(inpdir, sensor, thres, n_clusters):
+    import glob
+    from sklearn import cluster
+
+    assert 2 <= n_clusters <= 10
+
+    flist = glob.iglob(os.path.join(inpdir, '*_thres{:02d}CPD_lowpass.csv'.format(thres)))
+    X = []
+    n_lines = []
+    
+    for ind, fname in enumerate(flist):
+        nameparts = os.path.basename(fname).rsplit('_', 6)
+        ts = np.loadtxt(os.path.join(inpdir, '{}_{}_{}_T.csv'.format(nameparts[0], sensor, nameparts[2])), delimiter=',', usecols=[1], skiprows=1)
+        if ts.shape[0] > 200:
+            # only consider those portions that have more than 200
+            # points
+            X.append(np.loadtxt(fname, delimiter=',', skiprows=2, usecols=[1]))
+            n_lines.append(ts.shape[0])
+
+    freqbuckets = np.loadtxt(fname, delimiter=',', skiprows=2, usecols=[0])
+    
+    X = np.asarray(X)
+    
+    centroids, labels, _ = cluster.k_means(X, n_clusters)
+
+    print('Count of data points in each cluster:', np.bincount(labels))
+
+    plotdims_dict = {2: (1,2),
+                     3: (2,2),
+                     4: (2,2),
+                     5: (2,3),
+                     6: (2,3),
+                     7: (3,3),
+                     8: (3,3),
+                     9: (3,3),
+                     10: (4,3)}
+
+    rowdim, coldim = plotdims_dict[n_clusters][0], plotdims_dict[n_clusters][1]
+
+    # (1) plot only the centroids
+    fig1, axs1 = plt.subplots(rowdim, coldim,
+                            sharex=True, sharey=True,
+                            subplot_kw=dict(xlabel='CPD', ylabel='Bin prob'),
+                            figsize=(rowdim*3, coldim*4))
+    for centroid, ax in zip(centroids, axs1.flat):
+        ax.plot(freqbuckets, centroid, 'k-', alpha=0.5)
+
+    fig1.suptitle('All cluster centroids')    
+
+    fig2, axs2 = plt.subplots(rowdim, coldim,
+                            sharex=True, sharey=True,
+                            subplot_kw=dict(xlabel='CPD', ylabel='Bin prob'),
+                            figsize=(rowdim*3, coldim*4))
+    n_points_min = [np.inf] * n_clusters
+    n_points_max = [-np.inf] * n_clusters
+    for ind, label in enumerate(labels):
+        axs2.flat[label].plot(freqbuckets, X[ind,:], 'k-', alpha=0.5)
+        if n_lines[ind] < n_points_min[label]:
+            n_points_min[label] = n_lines[ind]
+        if n_lines[ind] > n_points_max[label]:
+            n_points_max[label] = n_lines[ind]
+    
+    for ind in range(n_clusters):
+        axs1.flat[ind].set_title('n_points {} to {}'.format(n_points_min[ind], n_points_max[ind]))
+        axs2.flat[ind].set_title('n_points {} to {}'.format(n_points_min[ind], n_points_max[ind]))
+    
+    fig2.suptitle('All data points')
+
+    plt.show()
+    
+    return
+    
+
+def plot_timeseries_weekwise(monitorid):
+    
+    pass
+
+
 def plot_bars_K_histlen_perf(modelname, quant, source, sensor, knn_version, mid, K=None, histlen=None):
     
     # plot bars for performance
