@@ -120,6 +120,7 @@ venv.bak/
 *.pdf
 *.ods
 *.json
+*.dta
 
 # output folders
 output/
