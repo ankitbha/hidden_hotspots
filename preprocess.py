@@ -9,44 +9,47 @@
 # ********************************************************************
 
 import os
+import argparse
 import pandas as pd
 
 
-def average_kaiterra_data(ddir, interval, end_dt, start_dt=None, fname='kaiterra_fieldeggid_all_current.csv'):
+def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
 
-    # start and end dates for data
-    if start_dt is None:
-        start_dt = pd.Timestamp('2018-03-01', tz='Asia/Kolkata')
-    
-    # if start & end dates are not in IST, then convert them to IST
-    if not start_dt.tzname != 'IST':
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.tz_localize('UTC')
-        start_dt = start_dt.tz_convert('Asia/Kolkata')
-
-    if not end_dt.tzname != 'IST':
-        if end_dt.tzinfo is None: 
-            end_dt = end_dt.tz_localize('UTC')
-        end_dt = end_dt.tz_convert('Asia/Kolkata')
-    
-    fpath = os.path.join(ddir, fname)
-    if not os.path.exists(fpath):
-        raise FileNotFoundError('Input file \"{}\" not found!'.format(fpath))
-    
+    # read in the data with index as the tuple (id, timestamp)
     data = pd.read_csv(fpath, index_col=[2,0], parse_dates=True)
-    
-    # rename the short ids to make them uppercase
-    data.rename(str.upper, axis=0, level=0, inplace=True)
     
     # sort the df by ids first, time next
     data.sort_index(level=0, inplace=True)
     
+    # start and end dates for data
+    if start_dt is None:
+        start_dt = pd.Timestamp('2018-03-01', tz='Asia/Kolkata')
+    
+    # if start & end dates are not in IST, then convert them to IST,
+    # assuming they are in UTC
+    if start_dt.tzname != 'IST':
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.tz_localize('UTC')
+        start_dt = start_dt.tz_convert('Asia/Kolkata')
+    
+    if end_dt.tzname != 'IST':
+        if end_dt.tzinfo is None: 
+            end_dt = end_dt.tz_localize('UTC')
+        end_dt = end_dt.tz_convert('Asia/Kolkata')
+    
+    if not os.path.exists(fpath):
+        raise FileNotFoundError('Input file \"{}\" not found!'.format(fpath))
+    
+    # rename the short ids to make them uppercase
+    data.rename(str.upper, axis=0, level=0, inplace=True)
+    
     # set the timezone in data to be UTC so that the df becomes tz-aware
-    data.tz_localize('UTC', level=1, copy=False)
+    if data.index.levels[1].tz is None:
+        data = data.tz_localize('UTC', level=1, copy=False)
     
     # now, the shift the timestamps in the data to the new timezone
     # (can be done only in tz-aware df)
-    data.tz_convert('Asia/Kolkata', level=1, copy=False)
+    data = data.tz_convert('Asia/Kolkata', level=1, copy=False)
     
     # now, filter through the start and end dates
     data = data.loc[(slice(None), slice(start_dt, end_dt)),:]
@@ -75,6 +78,37 @@ def average_kaiterra_data(ddir, interval, end_dt, start_dt=None, fname='kaiterra
 
     # save the final dataframe
     savename = 'kaiterra_fieldeggid_{}_{}_{}_panel.csv'.format(interval, start_dt.strftime('%Y%m%d'), end_dt.strftime('%Y%m%d'))
-    data_avged[['pm25', 'pm10']].to_csv(os.path.join(ddir, savename))
+    data_avged[['pm25', 'pm10']].to_csv(os.path.join(os.path.dirname(fpath), savename))
 
     return data_avged
+
+
+if __name__ == '__main__':
+
+    ts_type = lambda arg: pd.Timestamp(arg, tz='Asia/Kolkata')
+
+    fpath_default = os.path.join('data', 'kaiterra', 'kaiterra_fieldeggid_all_current.csv')
+
+    parser = argparse.ArgumentParser()
+
+    subparsers = parser.add_subparsers(title='Preprocessing operations on raw data',
+                                       help='List of valid preprocessing operations',
+                                       dest='operation')
+    parser_a = subparsers.add_parser('average', aliases=['avg'])
+    parser_a.add_argument('interval', help='Averaging interval (e.g. 15T, 1H, 1D)')
+    parser_a.add_argument('--file', '-f', help='Full path to data file')
+    parser_a.add_argument('--start', type=ts_type, help='Start timestamp in IST (=UTC+5:30)')
+    parser_a.add_argument('--end', type=ts_type, help='End timestamp in IST (=UTC+5:30)')
+
+    args = parser.parse_args()
+
+    if args.operation is None:
+        print('At least one preprocessing operation should be specified.')
+        parser.print_usage()
+
+    elif args.operation in ('average', 'avg'):
+        if args.file is None:
+            print('Input file not provided. Using the default: "{}"'.format(fpath_default))
+            args.file = fpath_default
+        data_avged = average_kaiterra_data(args.file, args.interval, args.start, args.end)
+    
