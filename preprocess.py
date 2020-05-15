@@ -76,9 +76,22 @@ def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
     data_avged = pd.concat(groups)
     data_avged.rename({'pm_25':'pm25', 'pm_10':'pm10'}, axis=1, inplace=True)
 
+    data_final = data_avged[['pm25', 'pm10']]
+
     # save the final dataframe
-    savename = 'kaiterra_fieldeggid_{}_{}_{}_panel.csv'.format(interval, start_dt.strftime('%Y%m%d'), end_dt.strftime('%Y%m%d'))
-    data_avged[['pm25', 'pm10']].to_csv(os.path.join(os.path.dirname(fpath), savename))
+    saveprefix = 'kaiterra_fieldeggid_{}_{}_{}'.format(interval, start_dt.strftime('%Y%m%d'), end_dt.strftime('%Y%m%d'))
+    savedir = os.path.dirname(fpath)
+    data_final.to_csv(os.path.join(savedir, saveprefix + '_panel.csv'))
+
+    # also save the data for each sensor separately
+    subdir = os.path.join(savedir, saveprefix)
+    if not os.path.exists(subdir):
+        os.mkdir(subdir)
+
+    grouped = data_final.groupby(level=0)
+    for name, group in grouped:
+        group.reset_index(level=0, drop=True, inplace=True)
+        group.to_csv(os.path.join(subdir, name + '.csv'))
 
     return data_avged
 
