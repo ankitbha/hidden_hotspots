@@ -109,7 +109,7 @@ def plot_cluster_freqbuckets(inpdir, n_clusters, thres_cpd=3, sensor='pm25', min
         flist = glob.iglob(os.path.join(inpdir, '{}_{}_*_freqbuckets_filter_thres{:02d}CPD_lowpass.csv'.format(monitor_id, sensor, thres_cpd)))
     X = []
     n_lines = []
-    
+
     for ind, fname in enumerate(flist):
         nameparts = os.path.basename(fname).rsplit('_', 6)
         ts = np.loadtxt(os.path.join(inpdir, '{}_{}_{}_T.csv'.format(nameparts[0], sensor, nameparts[2])), delimiter=',', usecols=[1], skiprows=1)
@@ -123,7 +123,7 @@ def plot_cluster_freqbuckets(inpdir, n_clusters, thres_cpd=3, sensor='pm25', min
         return
 
     freqbuckets = np.loadtxt(fname, delimiter=',', skiprows=2, usecols=[0])
-    
+
     X = np.asarray(X)
 
     if X.shape[0] > n_clusters:
@@ -337,37 +337,69 @@ def plot_scatter_1nn(mid, source, sensor):
 
 if __name__ == '__main__':
 
-    save_response = input('Save all figures? [y] ')
-    if save_response.strip().lower() == 'y':
-        save_response = True
-    else:
-        save_response = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument('plot', help='Which plot to make')
+    parser.add_argument('--yes', '-y', action='store_true', help='Save all figures')
+    parser.add_argument('--disp', '-d', action='store_true', help='Display all figures')
+    parser.add_argument('--source', choices=('kaiterra', 'govdata'), default='kaiterra')
+    parser.add_argument('--sensor', choices=('pm25', 'pm10'), default='pm25')
+    args = parser.parse_args()
 
-    # mids_list = ['CBC7', 'A9BE', 'C0A7', '72CA', 'BC46', '20CA', 'EAC8', '113E', 'E8E4', '603A']
-    mids1_list = np.loadtxt('data/kaiterra/kaiterra_fieldeggid_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
-    mids2_list = np.loadtxt('data/govdata/govdata_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
+    # type of plot
+    plot_types = ['linear_model', 'scatter_1nn', 'cluster_freqbuckets', 'hotspots_temporal']
+    if not args.plot in plot_types:
+        print('Specify a plot type from the following.', file=sys.stderr)
+        print(plot_types)
+        sys.exit(1)
     
-    # for mid in mids_list:
-    #     for quant in ['reg', 'excLF']:
-    #         for modelname in ['glm', 'elastic']:
-    #             print(mid, quant, modelname)
-    #             plot_bars_K_histlen_perf(modelname, quant, 'kaiterra', 'pm25', 'v2', mid)
+    save_response = args.yes
+    if save_response is False:
+        save_response = input('Save all figures? [y] ')
+        if save_response.strip().lower() == 'y':
+            save_response = True
+        else:
+            save_response = False
+    
+    if args.plot == 'linear_model':
+        mids_list = ['CBC7', 'A9BE', 'C0A7', '72CA', 'BC46', '20CA', 'EAC8', '113E', 'E8E4', '603A']
 
-    # plot_bars_mid_quant_bestperf(mids_list, 'kaiterra', 'pm25', 'v2')
-    
-    # for mid in mids1_list:
-    #     print(mid)
-    #     plot_scatter_1nn(mid, 'kaiterra', 'pm25')
-    
-    # for mid in mids2_list:
-    #     print(mid)
-    #     plot_scatter_1nn(mid, 'govdata', 'pm25')
+        for mid in mids_list:
+            for quant in ['reg', 'excLF']:
+                for modelname in ['glm', 'elastic']:
+                    print(mid, quant, modelname)
+                    plot_bars_K_histlen_perf(modelname, quant, args.source, args.sensor, 'v2', mid)
 
-    from itertools import chain
-    for mid in chain(mids1_list, mids2_list):
-        # print(mid)
-        plot_cluster_freqbuckets('figures/freq_components/location_wise/', 3, monitor_id=mid, save=save_response)
-        # flist = glob.glob(os.path.join('figures/freq_components/location_wise/', '{}_pm25_*_freqbuckets_filter_thres03CPD_lowpass.csv'.format(mid)))
-        # flist.sort()
-        # print(mid, len(flist))
-        # print(flist)
+        plot_bars_mid_quant_bestperf(mids_list, args.source, args.sensor, 'v2')
+    
+    elif args.plot == 'scatter_1nn':
+
+        mids1_list = np.loadtxt('data/kaiterra/kaiterra_fieldeggid_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
+        mids2_list = np.loadtxt('data/govdata/govdata_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
+        
+        for mid in tqdm(mids1_list):
+            plot_scatter_1nn(mid, 'kaiterra', args.sensor)
+        for mid in tqdm(mids2_list):
+            plot_scatter_1nn(mid, 'govdata', args.sensor)            
+
+    elif args.plot == 'cluster_freqbuckets':
+        from itertools import chain
+        
+        mids1_list = np.loadtxt('data/kaiterra/kaiterra_fieldeggid_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
+        mids2_list = np.loadtxt('data/govdata/govdata_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
+        
+        for mid in tqdm(chain(mids1_list, mids2_list), total=len(mids1_list) + len(mids2_list)):
+            plot_cluster_freqbuckets('output/freq_components/location_wise/', 3, monitor_id=mid, save=save_response)
+            flist = glob.glob(os.path.join('output/freq_components/location_wise/', '{}_{}_*_freqbuckets_filter_thres03CPD_lowpass.csv'.format(mid, args.sensor)))
+            flist.sort()
+
+    elif args.plot == 'hotspots_temporal':
+
+        fpath_list = glob.glob('output/hotspots/{}/{}/temporal/*/*/table_*.csv'.format(args.source, args.sensor))
+        fpath_list.sort()
+        
+        if args.disp:
+            plot_hotspots_temporal_binary(fpath_list[0], args.source, args.sensor, save=save_response, disp=args.disp)
+        else:
+            for count, fpath in enumerate(fpath_list, 1):
+                print('{}/{} {}'.format(count, len(fpath_list), fpath))
+                plot_hotspots_temporal_binary(fpath, args.source, args.sensor, save=save_response, disp=args.disp)
