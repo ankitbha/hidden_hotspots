@@ -13,6 +13,18 @@ import argparse
 import pandas as pd
 
 
+def round_to_week(ts):
+    """ Round a timestamp to the previous Monday. """
+    #return (ts - pd.DateOffset(days=ts.dayofweek)).floor('D')
+    return (ts - pd.DateOffset(days=ts.dayofweek, hour=0, minute=0, second=0))
+
+
+def round_to_month(ts):
+    """ Round a timestamp to beginning of the month. """
+    #return (ts - pd.DateOffset(days=ts.day)).floor('D')
+    return (ts - pd.DateOffset(days=ts.day-1, hour=0, minute=0, second=0))
+
+
 def average_govdata(fpath, interval, start_dt=None, end_dt=None):
 
     if not os.path.exists(fpath):
@@ -51,16 +63,37 @@ def average_govdata(fpath, interval, start_dt=None, end_dt=None):
             end_dt = end_dt.tz_localize('UTC')
         end_dt = end_dt.tz_convert('Asia/Kolkata')
 
+    start_dt = start_dt.floor('D')
+    end_dt = end_dt.ceil('D')
+
     # now, filter through the start and end dates
     data = data.loc[(slice(None), slice(start_dt, end_dt)),:]
-    
+
     # for the averaging operation, first append a column with rounded timestamps
     data.reset_index(inplace=True)
     data.rename({'timestamp_round' : 'timestamp'}, axis=1, inplace=True)
-    data['timestamp_round'] = data.timestamp.apply(lambda ts: ts.floor(interval))
 
     # reindexing so that all timestamps are in same range for every sensor
-    newindex = pd.date_range(start_dt, end_dt, freq=interval, closed='left', tz='Asia/Kolkata', name='timestamp_round')
+    if 'W' in interval:
+        interval = '1W'
+        data['timestamp_round'] = data.timestamp.apply(round_to_week, convert_dtype=False)
+        start = round_to_week(start_dt)
+        end = round_to_week(end_dt)
+        if (end_dt - end).value // 1e9 > 0:
+            end += pd.DateOffset(weeks=1)
+        newindex = pd.date_range(start, end, freq=pd.offsets.Week(weekday=0), closed='left', tz='Asia/Kolkata', name='timestamp_round')
+    elif 'M' in interval:
+        interval = '1M'
+        data['timestamp_round'] = data.timestamp.apply(round_to_month, convert_dtype=False)
+        start = round_to_month(start_dt)
+        end = round_to_month(end_dt)
+        if (end_dt - end).value // 1e9 > 0:
+            end += pd.DateOffset(months=1)
+        newindex = pd.date_range(start, end, freq=pd.offsets.MonthBegin(), closed='left', tz='Asia/Kolkata', name='timestamp_round')
+    else:
+        data['timestamp_round'] = data.timestamp.apply(lambda ts: ts.floor(interval), convert_dtype=False)
+        start, end = start_dt, end_dt
+        newindex = pd.date_range(start, end, freq=interval, closed='left', tz='Asia/Kolkata', name='timestamp_round')
 
     # create save paths and directory (if required)
     saveprefix = 'govdata_{}_{}_{}'.format(interval, start_dt.strftime('%Y%m%d'), end_dt.strftime('%Y%m%d'))
@@ -101,9 +134,20 @@ def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
     # sort the df by ids first, time next
     data.sort_index(level=0, inplace=True)
     
+    # set the timezone in data to be UTC so that the df becomes tz-aware
+    if data.index.levels[1].tz is None:
+        data = data.tz_localize('UTC', level=1, copy=False)
+    
+    # now, the shift the timestamps in the data to the new timezone
+    # (can be done only in tz-aware df)
+    data = data.tz_convert('Asia/Kolkata', level=1, copy=False)
+    
     # start and end dates for data
     if start_dt is None:
-        start_dt = pd.Timestamp('2018-03-01', tz='Asia/Kolkata')
+        start_dt = data.index.levels[1][0]
+
+    if end_dt is None:
+        end_dt = data.index.levels[1][-1]
     
     # if start & end dates are not in IST, then convert them to IST,
     # assuming they are in UTC
@@ -116,27 +160,41 @@ def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
         if end_dt.tzinfo is None: 
             end_dt = end_dt.tz_localize('UTC')
         end_dt = end_dt.tz_convert('Asia/Kolkata')
+
+    start_dt = start_dt.floor('D')
+    end_dt = end_dt.ceil('D')
     
     # rename the short ids to make them uppercase
+    # --> this op takes time
     data.rename(str.upper, axis=0, level=0, inplace=True)
-    
-    # set the timezone in data to be UTC so that the df becomes tz-aware
-    if data.index.levels[1].tz is None:
-        data = data.tz_localize('UTC', level=1, copy=False)
-    
-    # now, the shift the timestamps in the data to the new timezone
-    # (can be done only in tz-aware df)
-    data = data.tz_convert('Asia/Kolkata', level=1, copy=False)
-    
+
     # now, filter through the start and end dates
     data = data.loc[(slice(None), slice(start_dt, end_dt)),:]
-    
+
     # for the averaging operation, first append a column with rounded timestamps
     data.reset_index(inplace=True)
-    data['timestamp_round'] = data.time.apply(lambda ts: ts.floor(interval))
 
     # reindexing so that all timestamps are in same range for every sensor
-    newindex = pd.date_range(start_dt, end_dt, freq=interval, closed='left', tz='Asia/Kolkata', name='timestamp_round')
+    if 'W' in interval:
+        interval = '1W'
+        start = round_to_week(start_dt)
+        end = round_to_week(end_dt)
+        if (end_dt - end).value // 1e9 > 0:
+            end += pd.DateOffset(weeks=1)
+        newindex = pd.date_range(start, end, freq=pd.offsets.Week(weekday=0), closed='left', tz='Asia/Kolkata', name='timestamp_round')
+        data['timestamp_round'] = data.time.apply(round_to_week, convert_dtype=False)
+    elif 'M' in interval:
+        interval = '1M'
+        start = round_to_month(start_dt)
+        end = round_to_month(end_dt)
+        if (end_dt - end).value // 1e9 > 0:
+            end += pd.DateOffset(months=1)
+        newindex = pd.date_range(start, end, freq=pd.offsets.MonthBegin(), closed='left', tz='Asia/Kolkata', name='timestamp_round')
+        data['timestamp_round'] = data.time.apply(round_to_month, convert_dtype=False)
+    else:
+        data['timestamp_round'] = data.time.apply(lambda ts: ts.floor(interval), convert_dtype=False)
+        start, end = start_dt, end_dt
+        newindex = pd.date_range(start, end, freq=interval, closed='left', tz='Asia/Kolkata', name='timestamp_round')
 
     # do the averaging for each monitor id separately
     grouped = data.groupby('short_id')
