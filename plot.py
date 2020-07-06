@@ -2,8 +2,99 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import argparse
 import glob
+import sys
 import os
+
+from tqdm import tqdm
+
+def plot_hotspots_map(fpath, save=False, disp=False):
+    """ Show total count of hotspots at each location on a map. """
+
+    # hotspot parameters
+    _, h_type, a, b = os.path.splitext(os.path.basename(fpath))[0].split('_')
+
+    a_str, a_val = a[:2], int(a[2:])
+    b_str, b_val = b[:2], int(b[2:])
+
+    tres, sres = os.path.basename(os.path.dirname(fpath)).split('_')
+
+    table = pd.read_csv(fpath, index_col=[0], parse_dates=True, dtype=np.float16)
+
+    pass
+
+
+def plot_hotspots_temporal_binary(fpath, source, sensor, save=False, disp=False):
+    """Show hotspots in a table format based on the binary hotspots table. """
+
+    # hotspot parameters
+    _, h_type, a, b = os.path.splitext(os.path.basename(fpath))[0].split('_')
+
+    a_str, a_val = a[:2], int(a[2:])
+    b_str, b_val = b[:2], int(b[2:])
+
+    tres, sres = os.path.basename(os.path.dirname(fpath)).split('_')
+
+    table = pd.read_csv(fpath, index_col=[0], parse_dates=True, dtype=np.float16)
+
+    title_str = 'Hotspot temporal {}, {} {}, {} {}, {} {}'.format(h_type, tres, sres, a_str, a_val, b_str, b_val)
+    savename = 'hotspots_temporal_{}_{}_{}_{}_{}_{}{}_{}{}'.format(source, sensor, h_type, tres, sres, a_str, a_val, b_str, b_val)
+
+    plt.rc('font', size=16)
+    fig = plt.figure(figsize=(8,8))
+    ax = fig.add_subplot(111)
+    fig.suptitle(title_str)
+
+    for count, mid in enumerate(table.columns, 1):
+
+        tab = table[mid]
+
+        valid = tab.where(tab.isna(), other=count+1)
+        valid.plot(ax=ax, c='#00FF00', lw=3, alpha=0.5)
+        #gaps = tab.mask(tab.isna(), count+1).mask((tab == 0) | (tab == 1), np.nan)
+        #gaps.plot(ax=ax, lw=3, c='r')
+
+        #table[mid].plot(kind='bar', bottom=count-0.45, ax=ax)
+        values = tab.where(tab==1, other=np.nan) + count
+        values.plot(ax=ax, ls='none', marker='o', c='k')
+
+    ax.set_yticks(np.arange(2, count+3))
+    ax.set_yticklabels(table.columns.values, fontsize='x-small')
+    ax.tick_params(axis='y', right=0, left=1, length=10)
+    ax.grid(axis='y')
+    # fig.tight_layout()
+
+    if disp:
+        plt.show()
+
+    if save:
+        fig.savefig('figures/' + savename + '.png')
+
+    plt.close(fig)
+
+    totalcount = table.sum(axis=1).fillna(0).astype(int)
+    totalcount.name = 'hotspot_count'
+    fig = plt.figure(figsize=(8,2))
+    ax = fig.add_subplot(111)
+    fig.suptitle(title_str)
+    totalcount.plot(ax=ax)
+    ax.yaxis.set_major_locator(plt.MultipleLocator())
+    ax.tick_params(axis='y', right=0, left=1, length=10)
+    ax.grid(axis='y')
+
+    if disp:
+        plt.show()
+
+    if save:
+        fig.savefig('figures/' + savename + '_totalcount.png')
+        totalcount.sort_values(ascending=False).to_csv('figures/' + savename + '_totalcount.csv', header=True)
+
+    plt.close(fig)
+
+    plt.rcdefaults()
+
+    return
 
 
 def plot_cluster_freqbuckets(inpdir, n_clusters, thres_cpd=3, sensor='pm25', min_points=1000, monitor_id=None, save=False):
