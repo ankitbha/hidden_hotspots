@@ -8,9 +8,19 @@ import sys
 import os
 
 from tqdm import tqdm
+from pandas.plotting import register_matplotlib_converters
+
+register_matplotlib_converters()
+
+plt.rc('ps', useafm=True)
+plt.rc('pdf', use14corefonts=True)
 
 def plot_hotspots_map(fpath, save=False, disp=False):
+
     """ Show total count of hotspots at each location on a map. """
+
+    import tilemapbase
+    tilemapbase.start_logging()
 
     # hotspot parameters
     _, h_type, a, b = os.path.splitext(os.path.basename(fpath))[0].split('_')
@@ -25,8 +35,141 @@ def plot_hotspots_map(fpath, save=False, disp=False):
     pass
 
 
+def plot_hotspots_totalcount_tres(inpdir, source, sensor, h_type, sres, save=False, disp=False):
+    """ Show total count of hotspots at each time. """
+
+    def pick_table(tres):
+        choices = glob.glob(os.path.join(inpdir, source, sensor, 'temporal', h_type, 'tres{}_sres{}'.format(tres, sres),
+                                         'table_{}_*.csv'.format(h_type)))
+        choices.sort()
+        if len(choices) == 0:
+            return None
+        
+        table = choices[0]
+        if len(choices) > 1:
+            print('I found these tables for {}.'.format(tres))
+            for (ii, fpath) in enumerate(choices):
+                print(ii, fpath)
+            jj = 0
+            while True:
+                try:
+                    jj = int(input('Which one do you want to plot? '))
+                    if jj < 0 or jj >= len(choices):
+                        raise ValueError('Input outside limits')
+                    break
+                except ValueError:
+                    print('Invalid response. Try again.')
+            table = choices[jj]
+
+        print('Reading in this table for tres {}:'.format(tres), table)
+        table_df = pd.read_csv(table, index_col=[0], parse_dates=True, dtype=np.float16)
+        return table_df
+    # hotspot parametersn
+    # _, h_type, a, b = os.path.splitext(os.path.basename(fpath))[0].split('_')
+
+    # a_str, a_val = a[:2], int(a[2:])
+    # b_str, b_val = b[:2], int(b[2:])
+
+    # tres, sres = os.path.basename(os.path.dirname(fpath)).split('_')
+
+    # table = pd.read_csv(fpath, index_col=[0], parse_dates=True, dtype=np.float16)
+
+    #title_str = '{}, {}, {}, sres {}, {} {}, {} {}'.format(source, sensor, h_type, sres, a[0], a[1], b[0], b[1])
+    savename = 'hotspots_temporal_totalcount_{}_{}_{}_sres{}'.format(source, sensor, h_type, sres)
+
+    table_1H = pick_table('1H')
+    if table_1H is None:
+        print('No tables found for 1H!', file=sys.stderr)
+        return
+    table_1D = pick_table('1D')
+    if table_1D is None:
+        print('No tables found for 1D!', file=sys.stderr)
+        return
+    table_1W = pick_table('1W')
+    if table_1W is None:
+        print('No tables found for 1W!', file=sys.stderr)
+        return
+    
+    totalcount_1H = table_1H.sum(axis=1).fillna(0).astype(int)
+    totalcount_1H.name = 'hotspot_count_1H'
+
+    totalcount_1D = table_1D.sum(axis=1).fillna(0).astype(int)
+    totalcount_1D.name = 'hotspot_count_1D'
+
+    totalcount_1W = table_1W.sum(axis=1).fillna(0).astype(int)
+    totalcount_1W.name = 'hotspot_count_1W'
+    
+    fig = plt.figure(figsize=(4,6))
+    #fig.suptitle(title_str)
+
+    ax1 = fig.add_subplot(311)
+    ax1.vlines(totalcount_1H.index, 0, totalcount_1H.values, colors='b')
+    ax1.plot(totalcount_1H.index[totalcount_1H.values >= 1], totalcount_1H.values[totalcount_1H.values >= 1], ls='none', marker='.', c='k')
+    ax1.tick_params(bottom=0, labelbottom=0)
+    ax1.grid(axis='y')
+    ax1.set_title('1H time resolution')
+    ax1.set_ylabel('Total count')
+    
+    ax2 = fig.add_subplot(312, sharex=ax1, sharey=ax1)
+    ax2.vlines(totalcount_1D.index, 0, totalcount_1D.values, colors='r')
+    ax2.plot(totalcount_1D.index[totalcount_1D.values >= 1], totalcount_1D.values[totalcount_1D.values >= 1], ls='none', marker='.', c='k')
+    ax2.tick_params(bottom=0, labelbottom=0)
+    ax2.grid(axis='y')
+    ax2.set_title('1D time resolution')
+    ax2.set_ylabel('Total count')
+
+    ax3 = fig.add_subplot(313, sharex=ax1, sharey=ax1)
+    ax3.vlines(totalcount_1W.index, 0, totalcount_1W.values, colors='g')
+    ax3.plot(totalcount_1W.index[totalcount_1W.values >= 1], totalcount_1W.values[totalcount_1W.values >= 1], ls='none', marker='.', c='k')
+    #ax3.tick_params(axis='y', right=0, left=1, length=10)
+    ax3.grid(axis='y')
+    ax3.set_title('1W time resolution')
+    ax3.set_ylabel('Total count')
+    ax3.yaxis.set_major_locator(plt.MultipleLocator(2))
+
+    fig.canvas.draw()
+
+    month_list = ['Jan', 'Feb', 'Mar', 'Apr',
+                  'May', 'Jun', 'Jul', 'Aug',
+                  'Sep', 'Oct', 'Nov', 'Dec']
+    labels_cur = [txt.get_text() for txt in ax3.get_xticklabels()]
+    print(labels_cur)
+    labels_new = []
+    for lbl in labels_cur:
+        year, month = lbl.split('-')
+        month = int(month)
+        if month_list[month-1] == 'Jan':
+            labels_new.append('Jan\n' + year)
+        else:
+            labels_new.append(month_list[month-1])
+    ax3.set_xticklabels(labels_new)
+
+    #ax.plot(totalcount)
+    #totalcount.stem(ax=ax)
+    #ax.yaxis.set_major_locator(plt.MultipleLocator())
+
+    fig.subplots_adjust(left=0.12, right=0.98, bottom=0.06, top=0.96, hspace=0.25)
+
+    if disp:
+        plt.show()
+
+    if save:
+        fig.savefig('figures/' + savename + '.png')
+        fig.savefig('figures/' + savename + '.eps')
+        fig.savefig('figures/' + savename + '.pdf')
+        totalcount_1H.sort_values(ascending=False).to_csv('figures/' + savename + '_1H.csv', header=True)
+        totalcount_1D.sort_values(ascending=False).to_csv('figures/' + savename + '_1D.csv', header=True)
+        totalcount_1W.sort_values(ascending=False).to_csv('figures/' + savename + '_1W.csv', header=True)
+
+    plt.close(fig)
+
+    plt.rcdefaults()
+
+    return
+
+
 def plot_hotspots_temporal_binary(fpath, source, sensor, save=False, disp=False):
-    """Show hotspots in a table format based on the binary hotspots table. """
+    """ Show hotspots in a table format based on the binary hotspots table. """
 
     # hotspot parameters
     _, h_type, a, b = os.path.splitext(os.path.basename(fpath))[0].split('_')
@@ -41,7 +184,7 @@ def plot_hotspots_temporal_binary(fpath, source, sensor, save=False, disp=False)
     title_str = 'Hotspot temporal {}, {} {}, {} {}, {} {}'.format(h_type, tres, sres, a_str, a_val, b_str, b_val)
     savename = 'hotspots_temporal_{}_{}_{}_{}_{}_{}{}_{}{}'.format(source, sensor, h_type, tres, sres, a_str, a_val, b_str, b_val)
 
-    plt.rc('font', size=16)
+    plt.rc('font', size=20)
     fig = plt.figure(figsize=(8,8))
     ax = fig.add_subplot(111)
     fig.suptitle(title_str)
@@ -73,28 +216,8 @@ def plot_hotspots_temporal_binary(fpath, source, sensor, save=False, disp=False)
 
     plt.close(fig)
 
-    totalcount = table.sum(axis=1).fillna(0).astype(int)
-    totalcount.name = 'hotspot_count'
-    fig = plt.figure(figsize=(8,2))
-    ax = fig.add_subplot(111)
-    fig.suptitle(title_str)
-    totalcount.plot(ax=ax)
-    ax.yaxis.set_major_locator(plt.MultipleLocator())
-    ax.tick_params(axis='y', right=0, left=1, length=10)
-    ax.grid(axis='y')
-
-    if disp:
-        plt.show()
-
-    if save:
-        fig.savefig('figures/' + savename + '_totalcount.png')
-        totalcount.sort_values(ascending=False).to_csv('figures/' + savename + '_totalcount.csv', header=True)
-
-    plt.close(fig)
-
-    plt.rcdefaults()
-
     return
+
 
 
 def plot_cluster_freqbuckets(inpdir, n_clusters, thres_cpd=3, sensor='pm25', min_points=1000, monitor_id=None, save=False):
@@ -343,10 +466,16 @@ if __name__ == '__main__':
     parser.add_argument('--disp', '-d', action='store_true', help='Display all figures')
     parser.add_argument('--source', choices=('kaiterra', 'govdata'), default='kaiterra')
     parser.add_argument('--sensor', choices=('pm25', 'pm10'), default='pm25')
+    parser.add_argument('arguments', nargs='*', help='Additional arguments for the plot functions')
     args = parser.parse_args()
 
     # type of plot
-    plot_types = ['linear_model', 'scatter_1nn', 'cluster_freqbuckets', 'hotspots_temporal']
+    plot_types = ['linear_model',
+                  'scatter_1nn',
+                  'cluster_freqbuckets',
+                  'hotspots_temporal_binary',
+                  'hotspots_temporal_map',
+                  'hotspots_temporal_totalcount']
     if not args.plot in plot_types:
         print('Specify a plot type from the following.', file=sys.stderr)
         print(plot_types)
@@ -392,7 +521,7 @@ if __name__ == '__main__':
             flist = glob.glob(os.path.join('output/freq_components/location_wise/', '{}_{}_*_freqbuckets_filter_thres03CPD_lowpass.csv'.format(mid, args.sensor)))
             flist.sort()
 
-    elif args.plot == 'hotspots_temporal':
+    elif args.plot == 'hotspots_temporal_binary':
 
         fpath_list = glob.glob('output/hotspots/{}/{}/temporal/*/*/table_*.csv'.format(args.source, args.sensor))
         fpath_list.sort()
@@ -403,3 +532,21 @@ if __name__ == '__main__':
             for count, fpath in enumerate(fpath_list, 1):
                 print('{}/{} {}'.format(count, len(fpath_list), fpath))
                 plot_hotspots_temporal_binary(fpath, args.source, args.sensor, save=save_response, disp=args.disp)
+
+    elif args.plot == 'hotspots_temporal_map':
+
+        fpath_list = glob.glob('output/hotspots/{}/{}/temporal/*/*/table_*.csv'.format(args.source, args.sensor))
+        fpath_list.sort()
+        
+        if args.disp:
+            plot_hotspots_temporal_binary(fpath_list[0], args.source, args.sensor, save=save_response, disp=args.disp)
+        else:
+            for count, fpath in enumerate(fpath_list, 1):
+                print('{}/{} {}'.format(count, len(fpath_list), fpath))
+                plot_hotspots_temporal_binary(fpath, args.source, args.sensor, save=save_response, disp=args.disp)
+
+    elif args.plot == 'hotspots_temporal_totalcount':
+        inpdir = 'output/hotspots/'
+        h_type = args.arguments[0]
+        sres = 0
+        plot_hotspots_totalcount_tres(inpdir, args.source, args.sensor, h_type, sres, save=save_response, disp=args.disp)
