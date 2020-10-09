@@ -15,6 +15,140 @@ register_matplotlib_converters()
 plt.rc('ps', useafm=True)
 plt.rc('pdf', use14corefonts=True)
 
+import tilemapbase
+
+tilemapbase.start_logging()
+tilemapbase.init(create=True)
+
+
+def plot_values_map(source, sensor, res, start_date=None, end_date=None, save=False, disp=True):
+    """Show air quality values on a map, as a motivation for detailed hotspot study. """
+
+    # get sensor data
+    if start_date is None:
+        start_date = '20180501'
+    if end_date is None:
+        end_date = '20200201'
+
+    data = None
+    if source == 'kaiterra':
+        data = pd.read_csv('data/kaiterra/kaiterra_fieldeggid_{}_{}_{}_panel.csv'.format(res, start_date, end_date), 
+                           index_col=[0,1], parse_dates=True)
+    elif source == 'govdata':
+        data = pd.read_csv('data/govdata/govdata_{}_{}_{}.csv'.format(res, start_date, end_date), 
+                           index_col=[0,1], parse_dates=True)
+    elif source == 'combined':
+        data_kai = pd.read_csv('data/kaiterra/kaiterra_fieldeggid_{}_{}_{}_panel.csv'.format(res, start_date, end_date), 
+                               index_col=[0,1], parse_dates=True)
+        data_gov = pd.read_csv('data/govdata/govdata_{}_{}_{}.csv'.format(res, start_date, end_date), 
+                               index_col=[0,1], parse_dates=True)
+        data = pd.concat([data_kai, data_gov], axis=0, sort=False)
+    else:
+        print('Cannot recognize source name.')
+        return
+
+    # get locations info and initialize map parameters
+    locs_kai = pd.read_csv('data/kaiterra/kaiterra_locations.csv', index_col=[0])
+    locs_kai['Type'] = 'Kaiterra'
+    locs_gov = pd.read_csv('data/govdata/govdata_locations.csv', index_col=[0])
+    locs_gov['Type'] = 'Govt'
+    locs = pd.merge(locs_kai, locs_gov, how='outer', on=['Monitor ID', 'Latitude', 'Longitude', 'Location', 'Type'], copy=False)
+    lat_lims = locs.Latitude.min(), locs.Latitude.max()
+    lon_lims = locs.Longitude.min(), locs.Longitude.max()
+    lon_center, lat_center = locs.Longitude.mean(), locs.Latitude.mean()
+    lat_pad = 1.1 * max(lat_center - lat_lims[0], lat_lims[1] - lat_center)
+    lon_pad = 1.1 * max(lon_center - lon_lims[0], lon_lims[1] - lon_center)
+    extent = tilemapbase.Extent.from_lonlat(lon_center - lon_pad,
+                                            lon_center + lon_pad, 
+                                            lat_center - lat_pad,
+                                            lat_center + lat_pad)
+    extent_proj = extent.to_project_3857
+    tile = tilemapbase.tiles.Stamen_Toner_Background
+    color_dict = {'Kaiterra' : 'r', 'Govt' : 'b'}
+    
+    # formula for computing marker size proportional to the pm value
+    ms_min, ms_max = 10, 300
+    pm_min, pm_max = data[sensor].min(), data[sensor].max()
+
+    plt.rc('font', size=20)
+
+    colors = ['r', 'b']
+    #pm_values = np.linspace(pm_min, pm_max, 21)[1:11:2]
+    pm_values = np.arange(50, pm_max/2, 100)
+    
+    fig = plt.figure(figsize=(6,2))
+    ax = fig.add_subplot(111)
+
+    for x, pm in enumerate(pm_values, 1):
+        ms = (pm - pm_min) * (ms_max - ms_min) / (pm_max - pm_min) + ms_min
+        ax.scatter(x, 1, marker='.', alpha=0.4, color=colors[x%2], s=ms**2, edgecolors='none')
+    ax.set_xticks(np.arange(1, len(pm_values)+1))
+    ax.set_xticklabels(['{:.0f}'.format(pm) for pm in pm_values])
+    ax.set_xlim([0, len(pm_values)+1])
+    ax.yaxis.set_visible(False)
+    ax.tick_params(bottom=0)
+
+    fig.subplots_adjust(left=0.01, right=0.98, bottom=0.17, top=0.99)
+    if save:
+        savedir = 'figures/pm_map/{}/{}/'.format(sensor, source)
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        save_prefix = '{}_{}_{}_legend'.format(source, sensor, res)
+        fig.savefig(savedir + save_prefix + '.pdf')
+        fig.savefig(savedir + save_prefix + '.png')
+    if disp:
+        plt.show()
+    plt.close(fig)
+
+    # group by date
+    grouped = data.groupby(level=1)
+
+    for date, group in tqdm(grouped, total=data.index.levels[1].size, desc='Plotting on map'):
+        fig, ax = plt.subplots(figsize=(12,12), dpi=100)
+
+        if 'H' in res:
+            date_fmt = date.strftime('%Y-%m-%d %H hours')
+        elif res == '1D' or res == '1W':
+            date_fmt = date.strftime('%Y-%m-%d')
+        elif res == '1M':
+            date_fmt = date.strftime('%Y-%m')
+        fig.suptitle('{}, res {}'.format(date_fmt, res))
+        ax.text(0.03, 0.97, r'min {:.0f} $\mu g/m^3$'.format(group[sensor].min()),
+                horizontalalignment='left', verticalalignment='center', transform=ax.transAxes,
+                color='r', fontweight='bold')
+        ax.text(0.97, 0.97, r'max {:.0f} $\mu g/m^3$'.format(group[sensor].max()),
+                horizontalalignment='right', verticalalignment='center', transform=ax.transAxes,
+                color='r', fontweight='bold')
+        plotter = tilemapbase.Plotter(extent, tile, width=600)
+        plotter.plot(ax, tile)
+
+        for ((mid, ts), pm) in group[sensor].iteritems():
+            # size of marker should be proportional to "pm" value; we
+            # make a linear relationship between pm value and marker
+            # size
+            x, y = tilemapbase.project(locs.loc[mid].Longitude, locs.loc[mid].Latitude)
+            ms = (pm - pm_min) * (ms_max - ms_min) / (pm_max - pm_min) + ms_min
+            ax.scatter(x, y, marker='.', alpha=0.4, color=color_dict[locs.loc[mid].Type], s=ms**2, edgecolors='none')
+
+        fig.subplots_adjust(left=0.06, right=0.995, bottom=0.04, top=0.95)
+
+        if save:
+            savedir = 'figures/pm_map/{}/{}/{}/'.format(sensor, source, res)
+            if not os.path.exists(savedir):
+                os.makedirs(savedir)
+            save_prefix = '{}_{}_{}_{}'.format(source, sensor, res, date.strftime('%Y%m%dT%H'))
+            fig.savefig(savedir + save_prefix + '.pdf')
+            fig.savefig(savedir + save_prefix + '.png')
+        if disp:
+            plt.show()
+            break
+        
+        plt.close(fig)
+
+    plt.close('all')
+
+    return
+
 def plot_hotspots_map(fpath, save=False, disp=False):
 
     """ Show total count of hotspots at each location on a map. """
@@ -162,8 +296,6 @@ def plot_hotspots_totalcount_tres(inpdir, source, sensor, h_type, sres, save=Fal
         totalcount_1W.sort_values(ascending=False).to_csv('figures/' + savename + '_1W.csv', header=True)
 
     plt.close(fig)
-
-    plt.rcdefaults()
 
     return
 
@@ -462,11 +594,11 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('plot', help='Which plot to make')
-    parser.add_argument('--yes', '-y', action='store_true', help='Save all figures')
+    parser.add_argument('source', choices=('kaiterra', 'govdata', 'combined'))
+    parser.add_argument('sensor', choices=('pm25', 'pm10'))
+    parser.add_argument('--save', '-s', action='store_true', help='Save all figures')
     parser.add_argument('--disp', '-d', action='store_true', help='Display all figures')
-    parser.add_argument('--source', choices=('kaiterra', 'govdata'), default='kaiterra')
-    parser.add_argument('--sensor', choices=('pm25', 'pm10'), default='pm25')
-    parser.add_argument('arguments', nargs='*', help='Additional arguments for the plot functions')
+    parser.add_argument('arguments', nargs='*', help='Additional arguments for the plot function')
     args = parser.parse_args()
 
     # type of plot
@@ -474,14 +606,14 @@ if __name__ == '__main__':
                   'scatter_1nn',
                   'cluster_freqbuckets',
                   'hotspots_temporal_binary',
-                  'hotspots_temporal_map',
-                  'hotspots_temporal_totalcount']
+                  'hotspots_temporal_totalcount',
+                  'pm_map']
     if not args.plot in plot_types:
         print('Specify a plot type from the following.', file=sys.stderr)
         print(plot_types)
         sys.exit(1)
     
-    save_response = args.yes
+    save_response = args.save
     if save_response is False:
         save_response = input('Save all figures? [y] ')
         if save_response.strip().lower() == 'y':
@@ -533,20 +665,23 @@ if __name__ == '__main__':
                 print('{}/{} {}'.format(count, len(fpath_list), fpath))
                 plot_hotspots_temporal_binary(fpath, args.source, args.sensor, save=save_response, disp=args.disp)
 
-    elif args.plot == 'hotspots_temporal_map':
-
-        fpath_list = glob.glob('output/hotspots/{}/{}/temporal/*/*/table_*.csv'.format(args.source, args.sensor))
-        fpath_list.sort()
-        
-        if args.disp:
-            plot_hotspots_temporal_binary(fpath_list[0], args.source, args.sensor, save=save_response, disp=args.disp)
-        else:
-            for count, fpath in enumerate(fpath_list, 1):
-                print('{}/{} {}'.format(count, len(fpath_list), fpath))
-                plot_hotspots_temporal_binary(fpath, args.source, args.sensor, save=save_response, disp=args.disp)
-
     elif args.plot == 'hotspots_temporal_totalcount':
         inpdir = 'output/hotspots/'
         h_type = args.arguments[0]
         sres = 0
         plot_hotspots_totalcount_tres(inpdir, args.source, args.sensor, h_type, sres, save=save_response, disp=args.disp)
+
+    elif args.plot == 'pm_map':
+
+        res = args.arguments[0]
+        start_date, end_date = None, None
+
+        if len(args.arguments) == 2:
+            start_date = args.arguments[1]
+        elif len(args.arguments) == 3:
+            start_date, end_date = args.arguments[1], args.arguments[2]
+        elif len(args.arguments) > 3:
+            print('Only max 3 arguments allowed.')
+            sys.exit(-1)
+
+        plot_values_map(args.source, args.sensor, res, start_date, end_date, save=save_response, disp=args.disp)
