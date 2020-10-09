@@ -10,8 +10,10 @@
 
 import os
 import argparse
+import numpy as np
 import pandas as pd
 
+from tqdm import tqdm
 
 def round_to_week(ts):
     """ Round a timestamp to the previous Monday. """
@@ -33,8 +35,12 @@ def average_govdata(fpath, interval, start_dt=None, end_dt=None):
     # read in the data with index as the tuple (id, timestamp)
     data = pd.read_csv(fpath, index_col=[0,1], parse_dates=True)
 
+    # pm25 has negative values, so replace them with NaNs
+    data.pm25.loc[data.pm25 < 0] = np.nan
+
     # sort the df by ids first, time next
     data.sort_index(level=0, inplace=True)
+    n_mid = data.index.levels[0].size
     
     # set the timezone in data to be UTC so that the df becomes tz-aware
     if data.index.levels[1].tz is None:
@@ -105,7 +111,7 @@ def average_govdata(fpath, interval, start_dt=None, end_dt=None):
     # do the averaging for each monitor id separately and save it
     grouped = data.groupby('monitor_id')
     groups = []
-    for name, group in grouped:
+    for name, group in tqdm(grouped, total=n_mid, desc='Avging for each monitor'):
         df = group.drop(['monitor_id', 'timestamp'], axis=1).groupby('timestamp_round').mean()
         df = df.reindex(newindex, axis=0)
         df.to_csv(os.path.join(subdir, name + '.csv'))
@@ -133,6 +139,7 @@ def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
     
     # sort the df by ids first, time next
     data.sort_index(level=0, inplace=True)
+    n_mid = data.index.levels[0].size
     
     # set the timezone in data to be UTC so that the df becomes tz-aware
     if data.index.levels[1].tz is None:
@@ -199,7 +206,7 @@ def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
     # do the averaging for each monitor id separately
     grouped = data.groupby('short_id')
     groups = []
-    for name, group in grouped:
+    for name, group in tqdm(grouped, total=n_mid, desc='Avging for each monitor'):
         df = group.groupby('timestamp_round')[['pm_25', 'pm_10']].mean()
         df = df.reindex(newindex, axis=0)
         df['field_egg_id'] = name
@@ -266,4 +273,3 @@ if __name__ == '__main__':
                 print('Input file not provided. Using the default: "{}"'.format(fpath_default))
                 args.file = fpath_default
             data_avged = average_govdata(args.file, args.interval, args.start, args.end)
-    
