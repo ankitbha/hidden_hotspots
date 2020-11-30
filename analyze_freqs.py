@@ -19,19 +19,24 @@ from tqdm import tqdm
 import utils
 
 
-def compute_spectra(df, sensor, ntop=100):
+def compute_spectra(df, sensor, ntop=100, savedir=None):
     '''
     Compute spectrum for each contiguous region for each sensor.
     '''
 
-    fout = open('topperiods_new.txt', 'w')
-    fout.write('MID,Sensor,Start,End,Length,Top Periods\n')
+    #fout = open('topperiods_new.txt', 'w')
+    #fout.write('MID,Sensor,Start,End,Length,Top Periods\n')
 
     #N_TOP_FRAC = 0.8
-    N_TOP = ntop
+    #N_TOP = ntop
 
     #for mid in chain(df1.index.levels[0].values, df2.index.levels[0].values):
     for mid in df.index.levels[0].values:
+
+        if not savedir is None:
+            savesubdir = os.path.join(savedir, mid)
+            if not os.path.exists(savesubdir):
+                os.makedirs(savesubdir)
         
         # get data for this sensor
         #series = df.loc['CBC7'].pm25
@@ -49,8 +54,10 @@ def compute_spectra(df, sensor, ntop=100):
             block = series.iloc[inds]
             N = block.size
 
-            if N < N_TOP:
+            if N <= 1:
                 continue
+            #if N < N_TOP:
+            #    continue
 
             start_time, end_time = block.index[0], block.index[-1]
 
@@ -67,26 +74,20 @@ def compute_spectra(df, sensor, ntop=100):
             Yarg = np.angle(Y, deg=True)
 
             # sort the freq components by magnitude and apply filter
-            #Y_df = pd.DataFrame([freqs[:,np.newaxis], Y[:,np.newaxis], Ymag[:,np.newaxis], Yarg[:,np.newaxis]], columns=['freqs', 'dft', 'dft_mag', 'dft_arg_deg'])
             Y_df = pd.DataFrame(list(zip(freqs, Y, Ymag, Yarg)), columns=['freqs', 'dft', 'dft_mag', 'dft_arg_deg'])
-            # Y_df = pd.DataFrame(columns=['freqs', 'dft', 'dft_mag', 'dft_arg_deg'])
-            # Y_df.freqs = freqs
-            # Y_df.dft = Y
-            # Y_df.dft_mag = Ymag
-            # Y_df.dft_arg_deg = Yarg
-            Y_filter_df = Y_df.sort_values('dft_mag', ascending=False)
-            topfreqs = Y_filter_df.freqs.values
-            with np.errstate(divide='ignore'):
-                topperiods = 1/topfreqs
+            #Y_filter_df = Y_df.sort_values('dft_mag', ascending=False)
+            #topfreqs = Y_filter_df.freqs.values
+            #with np.errstate(divide='ignore'):
+            #    topperiods = 1/topfreqs
 
             #dft_cumsum_frac = Y_filter_df.dft_abs.cumsum() / Y_filter_df.dft_abs.sum()
             #N_TOP = sum(dft_cumsum_frac <= N_TOP_FRAC)
 
-            Y_filter_df.loc[Y_filter_df.index[N_TOP:], ['dft', 'dft_mag', 'dft_arg_deg']] = 0
-            Y_filter_df.sort_index(inplace=True)
-            Y_filter = Y_filter_df.dft.values
-            y_filter_recon = np.fft.irfft(Y_filter, N)
-            block_filter_recon = pd.Series(y_filter_recon, index=block.index, name=sensor + ' recon (N_TOPFREQS = {}/{})'.format(N_TOP,N))
+            #Y_filter_df.loc[Y_filter_df.index[N_TOP:], ['dft', 'dft_mag', 'dft_arg_deg']] = 0
+            #Y_filter_df.sort_index(inplace=True)
+            #Y_filter = Y_filter_df.dft.values
+            #y_filter_recon = np.fft.irfft(Y_filter, N)
+            #block_filter_recon = pd.Series(y_filter_recon, index=block.index, name=sensor + ' recon (N_TOPFREQS = {}/{})'.format(N_TOP,N))
 
             print(mid, 'Start:', start_time, 'End:', end_time, 'Length:', N)
             
@@ -96,8 +97,8 @@ def compute_spectra(df, sensor, ntop=100):
             fig, axs = plt.subplots(2, 1, figsize=(20,20))
             fig.suptitle('{}, {}, {} to {}'.format(mid, sensor, start_time, end_time))
             block.plot(c='k', ls='-', ax=axs[0])
-            block_filter_recon.plot(c='r', ls='--', ax=axs[0])
-            # axs[0].plot(freqs, y, 'k-', freqs, y_filter_recon, 'r--')
+            #block_filter_recon.plot(c='r', ls='--', ax=axs[0])
+            #axs[0].plot(freqs, y, 'k-', freqs, y_filter_recon, 'r--')
             axs[0].legend(loc=0, ncol=2, fontsize='small')
             axs[1].stem(freqs[1:], Ymag[1:])
             axs[1].set_xlabel('Freq (cycles per day)')
@@ -106,20 +107,24 @@ def compute_spectra(df, sensor, ntop=100):
             axs[1].set_xlim(0, f_s/2)
             
             fig.subplots_adjust(bottom=0.2)
-            fig.savefig('figures/{}_{}_{:03d}_DFT.png'.format(mid, sensor, count))
+            if savedir is None:
+                plt.show()
+
+            else:
+                fig.savefig(os.path.join(savesubdir, '{}_{}_{:03d}_DFT.png'.format(mid, sensor, count)))
+                block.to_csv(os.path.join(savesubdir, '{}_{}_{:03d}_T.csv'.format(mid, sensor, count)), header=True)
+                Y_df.sort_values('dft_mag', ascending=False, inplace=True)
+                Y_df.to_csv(os.path.join(savesubdir, '{}_{}_{:03d}_DFT.csv'.format(mid, sensor, count)),
+                            columns=['freqs', 'dft_mag', 'dft_arg_deg'], index=False, float_format='%.4f')
             
             plt.close(fig)
 
             plt.rcdefaults()
             
-            block.to_csv('figures/{}_{}_{:03d}_T.csv'.format(mid, sensor, count), header=True)
-            Y_df.sort_values('dft_mag', ascending=False, inplace=True)
-            Y_df.to_csv('figures/{}_{}_{:03d}_DFT.csv'.format(mid, sensor, count), columns=['freqs', 'dft_mag', 'dft_arg_deg'], index=False, float_format='%.4f')
             
-            fout.write('{},{},{},{},{},[{}]\n'.format(mid, sensor, start_time, end_time, N, ' '.join(['{:.5f}'.format(per) for per in topperiods[1:N_TOP+1]])))
+            #fout.write('{},{},{},{},{},[{}]\n'.format(mid, sensor, start_time, end_time, N, ' '.join(['{:.5f}'.format(per) for per in topperiods[1:N_TOP+1]])))
     
-
-    fout.close()
+    #fout.close()
     
     return
 
@@ -192,12 +197,19 @@ def bin_topperiods(thres, filter_type='low', nbins=10):
 
 
 def bin_freqs(inpdir, sensor, n_bins=10, savedir=None):
-
+    '''Bin all the frequencies from all the DFTs in "inpdir", computed
+    using the "compute_spectra" function (a better version than
+    bin_topperiods, since it takes the entire DFT into account for
+    each contiguous region of each sensor, instead of only the top
+    N_TOP freq components).
+    
+    '''
+    
     if savedir is None:
         outpath = os.path.join(inpdir, 'allfreqs_{}_{}_hist.csv'.format(sensor, n_bins))
     else:
         outpath = os.path.join(savedir, 'allfreqs_{}_{}_hist.csv'.format(sensor, n_bins))
-        
+    
     if os.path.exists(outpath):
         table = np.genfromtxt(outpath, delimiter=',', skip_header=1)
         bins = table[:,0]
@@ -389,28 +401,41 @@ def filter_plot(inpdir, sensor, thres, bins, disp=False, save=True):
 
 if __name__ == '__main__':
     
-    f_s = 96
+    sampling_interval = '3H'
     
-    #suffix = '2019_Feb_28'
+    sensor = 'pm25'
+    
+    inpdir = 'figures/freq_components/raw/{}/'.format(sampling_interval)
+    
+    # number of samples per day (freq of sampling)
+    f_s = None
+    if sampling_interval[-1] == 'T':
+        f_s = (24 * 60) / int(sampling_interval[:-1])
+    elif sampling_interval[-1] == 'H':
+        f_s = 24 / int(sampling_interval[:-1])
+    elif sampling_interval[-1] == 'D':
+        f_s = 1 / int(sampling_interval[:-1])
+    
+    suffix = '20180501_20191101'
+    
     #df1 = pd.read_csv('data/kaiterra_fieldeggid_15min_{}_panel.csv'.format(suffix), index_col=[0,1], parse_dates=True)
     #df2 = pd.read_csv('data/govdata/govdata_15min_panel.csv', index_col=[0,1], parse_dates=True)
     #df = pd.concat([df1, df2], axis=0, sort=False, copy=False)
-    #compute_spectra(df, 'pm25')
-
-    sensor = 'pm25'
-    
-    inpdir = 'figures/freq_components/location_wise/'
+    df = pd.read_csv('data/kaiterra/kaiterra_fieldeggid_{}_{}_panel.csv'.format(sampling_interval, suffix),
+                     index_col=[0,1], parse_dates=True)
+    compute_spectra(df, 'pm25', savedir=inpdir)
     
     # threshold for filtering in cycles per day (frequency unit)
-    thres = 3
+    #thres = 1
     
     # binning interval for binning the frequencies
-    n_bins = 100
+    #n_bins = 100
     
-    # bin_topperiods(thres, nbins=n_bins)
-    bins, hist = bin_freqs(inpdir, sensor, n_bins, 'figures/freq_components/')
+    # bin ALL the frequencies so that those bins can be used for
+    # filter_plot and other things
+    #bins, hist = bin_freqs(inpdir, sensor, n_bins, 'figures/freq_components/')
 
-    print('Frequency bins:', bins)
+    #print('Frequency bins:', bins)
 
     #dftpathlist = glob.glob(os.path.join(inpdir, '*_{}_*_DFT.csv'.format(sensor)))
     #dftpath = dftpathlist[np.random.randint(0, len(dftpathlist))]
@@ -429,4 +454,4 @@ if __name__ == '__main__':
     #ypath = dftpath.replace('DFT', 'T')
 
     #filter_plot_single(ypath, dftpath, sensor, thres, bins, disp=False, save=True)
-    filter_plot(inpdir, sensor, thres, bins, disp=False, save=True)
+    #filter_plot(inpdir, sensor, thres, bins, disp=False, save=True)
