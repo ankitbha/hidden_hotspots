@@ -121,11 +121,12 @@ venv.bak/
 *.ods
 *.json
 *.dta
+*.txt
 
-# output folders
+# folders
+notes/
 output/
 datasets/
-#models/
 plots/
 figures/
 results/
