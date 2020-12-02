@@ -50,7 +50,12 @@ def get_latlondict_gov():
 
 def make_knn_dataset_v1(NAME, df, monitorids_list, numnodes_min, numnodes_max, sensor, savedir):
     
-    latlondict = get_latlondict_kaiterra() if NAME == 'kaiterra' else get_latlondict_gov()
+    #latlondict = get_latlondict_kaiterra() if NAME == 'kaiterra' else get_latlondict_gov()
+    if NAME == 'kaiterra':
+        locations = pd.read_csv('data/kaiterra/kaiterra_locations.csv', usecols=[0,2,3], index_col=[0])
+    else:
+        locations = pd.read_csv('data/govdata/govdata_locations.csv', usecols=[0,1,2], index_col=[0])
+
     tsindex = df.index.levels[1]
     
     # The goal now is to run script for several combinations of
@@ -60,7 +65,7 @@ def make_knn_dataset_v1(NAME, df, monitorids_list, numnodes_min, numnodes_max, s
         
         # compute and store the sorted distances of every monitor from
         # "monitorid"
-        dists_list = [(idnum, distance.distance(latlondict[monitorid], latlondict[idnum]).meters) for idnum in monitorids_list if idnum != monitorid]
+        dists_list = [(idnum, distance.distance(locations.loc[monitorid], locations.loc[idnum]).meters) for idnum in monitorids_list if idnum != monitorid]
         dists_list.sort(key=itemgetter(1))
         
         # create new empty dataframe with 3 columns for every sensor
@@ -101,7 +106,12 @@ def make_knn_dataset_v1(NAME, df, monitorids_list, numnodes_min, numnodes_max, s
 
 def make_knn_dataset_v2(NAME, df, monitorids_list, numnodes_min, numnodes_max, sensor, savedir):
     
-    latlondict = get_latlondict_kaiterra() if NAME == 'kaiterra' else get_latlondict_gov()
+    #latlondict = get_latlondict_kaiterra() if NAME == 'kaiterra' else get_latlondict_gov()
+    if NAME == 'kaiterra':
+        locations = pd.read_csv('data/kaiterra/kaiterra_locations.csv', usecols=[0,2,3], index_col=[0])
+    else:
+        locations = pd.read_csv('data/govdata/govdata_locations.csv', usecols=[0,1,2], index_col=[0])
+
     tsindex = df.index.levels[1]
     
     # The goal now is to run script for several combinations of
@@ -114,12 +124,12 @@ def make_knn_dataset_v2(NAME, df, monitorids_list, numnodes_min, numnodes_max, s
         dists_bearings_list = []
         for idnum in monitorids_list:
             if idnum != monitorid:
-                dist = distance.distance(latlondict[idnum], latlondict[monitorid]).meters
+                dist = distance.distance(locations.loc[idnum], locations.loc[monitorid]).meters
                 
                 # note: computing bearing of 'idnum' wrt 'monitorid'
                 # (opposite of what was done previously for Nov 2018
                 # Ubicomp submission)
-                bearing = get_bearing(latlondict[monitorid], latlondict[idnum])
+                bearing = get_bearing(locations.loc[monitorid], locations.loc[idnum])
                 
                 dists_bearings_list.append((idnum, dist, bearing))
         
