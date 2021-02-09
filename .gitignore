@@ -124,6 +124,7 @@ venv.bak/
 *.txt
 
 # folders
+data/
 notes/
 output/
 datasets/
