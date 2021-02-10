@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import argparse
+import pytz
 import glob
 import sys
 import os
@@ -18,8 +19,135 @@ plt.rc('pdf', use14corefonts=True)
 import tilemapbase
 
 tilemapbase.start_logging()
-tilemapbase.init(create=True)
+tilemapbase.init()
 
+
+def plot_hotspot_profile(fpath, start_dt=None, end_dt=None, save=False, disp=True):
+
+    table = pd.read_csv(fpath, index_col=[0], parse_dates=True)
+
+    # start and end dates for data
+    if start_dt is not None:
+        start_dt = start_dt.strftime('%Y%m%d')
+
+    if end_dt is not None:
+        end_dt = end_dt.strftime('%Y%m%d')
+
+    subdir = 'profiles_{}_{}'.format(start_dt, end_dt)
+    savedir = os.path.join(os.path.dirname(fpath), subdir)
+    if not os.path.exists(savedir):
+        os.mkdir(savedir)
+
+    table = table.loc[start_dt:end_dt,:]
+
+    X = np.arange(1, 15)
+    hotspot_keys = ['001', '009', '010', '011', '019', '090', '091', '099', '100', '110', '190', '900', '910', '990']
+    hotspot_names = ['jlow', 'jhigh', 'slow', 'slow-jlow', 'slow-jhigh', 'shigh', 'shigh-jlow', 'shigh-jhigh',
+                     'tlow', 'tlow-slow', 'tlow-shigh', 'thigh', 'thigh-slow', 'thigh-shigh']
+    totalcounts = pd.DataFrame(index=hotspot_keys, columns=table.columns, data=0)
+    totalcounts.insert(0, 'hotspot_name', hotspot_names)
+
+    plt.rc('font', size=16)
+
+    for mid in tqdm(table.columns):
+        for code in table[mid]:
+            if not np.isnan(code):
+                t = int(code // 100)
+                j = int(code % 10)
+                if t & j:
+                    code -= j
+                totalcounts.loc['{:03.0f}'.format(code),mid] += 1
+        total = totalcounts[mid].sum()
+        fig = plt.figure(figsize=(8,3))
+        ax = fig.add_subplot(111)
+        fig.suptitle('Hotspot profile at {} - Total {}'.format(mid, total))
+        (totalcounts[mid] / total).plot(kind='bar', rot=30)
+        ax.grid(axis='y')
+        ax.set_ylim(0, 1.1)
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.9)
+        fig.savefig(os.path.join(savedir, mid + '_profile_{:04d}.png'.format(total)))
+
+        if disp:
+            plt.show()
+        plt.close(fig)
+
+    totalcounts.index.name = 'hotspot_type'
+    totalcounts.to_csv(os.path.join(savedir, 'totalcounts.csv'))
+
+    return
+
+
+def plot_locs(tile=tilemapbase.tiles.Stamen_Toner_Background, labels=False, save=False, disp=True):
+    
+    # get locations info and initialize map parameters
+    locs_kai = pd.read_csv('data/kaiterra/kaiterra_locations.csv', index_col=[0])
+    locs_kai['Type'] = 'Kaiterra'
+    locs_gov = pd.read_csv('data/govdata/govdata_locations.csv', index_col=[0])
+    locs_gov['Type'] = 'Govt'
+    locs = pd.merge(locs_kai, locs_gov, how='outer', on=['Monitor ID', 'Latitude', 'Longitude', 'Location', 'Type'], copy=False)
+    lon_min, lat_min = locs.Longitude.min(), locs.Latitude.min()
+    lon_max, lat_max = locs.Longitude.min(), locs.Latitude.max()
+    lon_center, lat_center = locs.Longitude.mean(), locs.Latitude.mean()
+    lat_pad = 1.1 * max(lat_center - lat_min, lat_max - lat_center)
+    lon_pad = 1.1 * max(lon_center - lon_min, lon_max - lon_center)
+    extent = tilemapbase.Extent.from_lonlat(lon_center - lon_pad,
+                                            lon_center + lon_pad, 
+                                            lat_center - lat_pad,
+                                            lat_center + lat_pad)
+    extent_3857 = extent.to_project_3857()
+    color_dict = {'Kaiterra' : 'r', 'Govt' : 'b'}
+
+    plt.rc('font', size=20)
+
+    fig, ax = plt.subplots(figsize=(12,12), dpi=300)
+    ax.xaxis.set_visible(False)
+    ax.yaxis.set_visible(False)
+
+    plotter = tilemapbase.Plotter(extent, tile, width=600)
+    #plotter = tilemapbase.Plotter(extent, tile, zoom=13)
+    plotter.plot(ax, tile)
+
+    #X_kai, Y_kai = zip(*map(tilemapbase.project, locs.Longitude[locs['Type']=='Kaiterra'], locs.Latitude[locs['Type']=='Kaiterra']))
+    #ax.scatter(X_kai, Y_kai, marker='.', color='r', s=400, label='Our sensors')
+
+    #X_gov, Y_gov = zip(*map(tilemapbase.project, locs.Longitude[locs['Type']=='Govt'], locs.Latitude[locs['Type']=='Govt']))
+    #ax.scatter(X_gov, Y_gov, marker='.', color='b', s=400, label='CPCB/DPCC/IMD')
+
+    for row in locs.itertuples():
+        x, y = tilemapbase.mapping.project(row.Longitude, row.Latitude)
+        if row.Type == 'Kaiterra':
+            obj1 = ax.scatter(x, y, marker='.', color='r', s=200, label='Our sensors')
+        else:
+            obj2 = ax.scatter(x, y, marker='.', color='b', s=200, label='CPCB/DPCC/IMD')
+
+        if labels:
+            ax.text(x, y, row.Index, fontsize=3)
+
+    # custom locations of hotspots
+    hotspots_list = []
+    #hotspots_list.append((28.66541706460955, 77.23223216488675, 'IGDTUW'))
+    #hotspots_list.append((28.628056, 77.246667, 'ITO Crossing'))
+
+    for lon, lat, name in hotspots_list:
+        x, y = tilemapbase.project(lon, lat)
+        ax.scatter(x, y, marker='*', color='g', s=200, label=name)
+        ax.text(x, y, name, fontsize=8)
+
+    ax.legend((obj1, obj2), (obj1.get_label(), obj2.get_label()), loc='lower right', ncol=2)
+    #ax.legend(loc='lower right', ncol=2)
+
+    if save:
+        if labels:
+            fig.savefig('figures/locs_map_labels.pdf', dpi=300)
+        else:
+            fig.savefig('figures/locs_map.pdf', dpi=300)
+    if disp:
+        plt.show()
+
+    plt.close(fig)
+
+    return
 
 def plot_values_map(source, sensor, res, start_date=None, end_date=None, save=False, disp=True):
     """Show air quality values on a map, as a motivation for detailed hotspot study. """
@@ -594,15 +722,17 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('plot', help='Which plot to make')
-    parser.add_argument('source', choices=('kaiterra', 'govdata', 'combined'))
-    parser.add_argument('sensor', choices=('pm25', 'pm10'))
+    parser.add_argument('--source', choices=('kaiterra', 'govdata', 'combined'))
+    parser.add_argument('--sensor', choices=('pm25', 'pm10'))
     parser.add_argument('--save', '-s', action='store_true', help='Save all figures')
     parser.add_argument('--disp', '-d', action='store_true', help='Display all figures')
     parser.add_argument('arguments', nargs='*', help='Additional arguments for the plot function')
     args = parser.parse_args()
 
     # type of plot
-    plot_types = ['linear_model',
+    plot_types = ['hotspot_profile',
+                  'locs',
+                  'linear_model',
                   'scatter_1nn',
                   'cluster_freqbuckets',
                   'hotspots_temporal_binary',
@@ -620,8 +750,36 @@ if __name__ == '__main__':
             save_response = True
         else:
             save_response = False
+
+    if args.plot == 'hotspot_profile':
+        fpath = args.arguments[0]
+
+        start_dt = end_dt = None
+        nn = 1
+        while nn < len(args.arguments):
+            opt = args.arguments[nn]
+            val = pd.Timestamp(args.arguments[nn+1], tz=pytz.FixedOffset(330))
+            if opt == '-S' or opt == '--start-dt':
+                start_dt = val
+            elif opt == '-E' or opt == '--end-dt':
+                end_dt = val
+            else:
+                print('Option should be either \'-s/--start-dt\' or \'-e/--end-dt\'', file=sys.stderr)
+                sys.exit(-1)
+            nn += 2
+        # mid = None
+        # if len(args.arguments) == 2:
+        #     mid = args.arguments[1]
+        # elif len(args.arguments) > 2:
+        #     print('Only two arguments allowed: path to table, and (optionally) monitor ID', file=sys.stderr)
+        #     sys.exit(-1)
+        plot_hotspot_profile(fpath, start_dt, end_dt, save_response, args.disp)
+    elif args.plot == 'locs':
+        tile = tilemapbase.tiles.build_OSM()
+        labels = False
+        plot_locs(tile, labels, save_response, args.disp)
     
-    if args.plot == 'linear_model':
+    elif args.plot == 'linear_model':
         mids_list = ['CBC7', 'A9BE', 'C0A7', '72CA', 'BC46', '20CA', 'EAC8', '113E', 'E8E4', '603A']
 
         for mid in mids_list:
