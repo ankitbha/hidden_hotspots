@@ -27,6 +27,76 @@ def round_to_month(ts):
     return (ts - pd.DateOffset(days=ts.day-1, hour=0, minute=0, second=0))
 
 
+# read data for an excel file and return a list of dataframes, 
+# one for each monitor in the file
+def read_xlsx(fpath):
+    from openpyxl import Workbook
+    from openpyxl import load_workbook
+    from datetime import datetime
+    
+    # handy conversion function to handle missing values
+    def myconv(strval):
+        if strval=='None' or strval==None:
+            return np.nan
+        else:
+            return float(strval)
+
+    workbook = load_workbook(fpath)
+    sheet = workbook['Sheet1']
+    fname = os.path.basename(fpath)
+    
+    #ROW_START = 14
+    
+    header = None
+    for HEADER_ROW_NUM, row in enumerate(sheet.values, 1):
+        if row[0] == 'From Date':
+            header = [row[0]] + [s for s in row[2:] if s is not None]
+            break
+    
+    # current row where we are
+    rr = HEADER_ROW_NUM + 1
+    
+    # the sheet may have data from multiple locations, so the outer
+    # loop iterates through the location, the inner loop iterates 
+    # through the rows for each location
+    #parts = fname[:fname.find('_' + suffix)].split('_')
+    parts = fname[:-5].split('_')
+    n_monitors = (len(parts) - 3) // 2
+    print('Number of monitors:', n_monitors)
+    
+    data_list = []
+    
+    count = 0
+    while count < n_monitors*2:
+        name = '{}_{}'.format(parts[count], parts[count+1])
+        
+        data = []
+        
+        print('Reading data for', name)
+        for row in sheet.iter_rows(rr, max_col=len(header)+1, values_only=True):
+            date = row[0]
+            if date is None or len(date) == 1:
+                break
+            readings = [myconv(val) for val in row[2:]]
+            
+            # to re-format the date and time in the same format as the Kaiterra dts
+            dobj = datetime.strptime(date, '%d-%m-%Y %H:%M')
+            dobj = pd.Timestamp(dobj, tz='Asia/Kolkata')
+            data.append([dobj] + readings)
+        
+        df = pd.DataFrame(data, columns=header)
+        df.rename(columns={'From Date':'timestamp_round', 'PM2.5':'pm25', 'PM10':'pm10'}, copy=False, inplace=True)
+        df.set_index('timestamp_round', inplace=True)
+        df.sort_index(axis=1, inplace=True) # sort the columns
+        
+        data_list.append((name, df))
+        
+        rr += len(data) + 2
+        count += 2
+    
+    return data_list
+
+
 def average_govdata(fpath, interval, start_dt=None, end_dt=None):
 
     if not os.path.exists(fpath):
