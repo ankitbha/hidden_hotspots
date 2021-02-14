@@ -1,7 +1,27 @@
 
-
+import sys
+import argparse
 import numpy as np
 
+
+def prettyprint_args(ns, outfile=sys.stdout):
+    print('\nInput argument --', file=outfile)
+
+    for k,v in ns.__dict__.items():
+        print('{}: {}'.format(k,v), file=outfile)
+
+    print(file=outfile)
+    return
+
+
+def frac_type(arg):
+    try:
+        val = float(arg)
+        if val <= 0 or val >= 1:
+            raise ValueError
+    except ValueError:
+        raise argparse.ArgumentTypeError('train-test split should be in (0,1)')
+    return val
 
 
 # do some smoothing
