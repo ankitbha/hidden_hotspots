@@ -22,6 +22,89 @@ from datetime import datetime, timedelta
 import time
 import json
 
+
+def get_locations(datadir):
+
+    fpath_kai = os.path.join(datadir, 'kaiterra', 'kaiterra_locations.csv')
+    fpath_gov = os.path.join(datadir, 'govdata', 'govdata_locations.csv')
+    
+    if source == 'combined' or source is None:
+        locs_df_kai = pd.read_csv(fpath_kai, usecols=[0,2,3,4], index_col=[0])
+        locs_df_kai['Source'] = 'Kaiterra'
+        locs_df_gov = pd.read_csv(fpath_gov, index_col=[0])
+        locs_df_gov['Source'] = 'Govt'
+        locs_df = pd.concat([locs_df_kai, locs_df_gov], axis=0, sort=False)
+
+    locs_df.sort_index(inplace=True)
+
+    return locs_df
+
+
+def get_adjacency_matrix(datadir, source=None, thres=None, n_max=None):
+    """'source': None/'combined', 'kaiterra' or 'govdata' (default: None)
+
+    'thres': threshold distance in meters (default: None)
+
+    'n_max': max number of neighbors (default: None)
+
+    TODO: Should the graph be undirected or directed?  That is, is it
+    ok for sensor A to be in the influence ilst of B, but not
+    vice-versa? I think it should directed, esp if we take into
+    account wind direction. If it directed, then the adj matrix is no
+    longer symmetric.
+
+    """
+
+    if source is None:
+        source = 'combined'
+    savepath = os.path.join(datadir, '{}_distances.csv'.format(source))
+
+    if os.path.exists(savepath):
+        adj_matrix_df = pd.read_csv(savepath, index_col=[0])
+    else:
+        locs_df = get_locations(datadir)
+        adj_matrix = np.empty((locs_df.index.size, locs_df.index.size), dtype=np.float64)
+
+        for ii, mid in enumerate(locs_df.index):
+            coords = (locs_df.loc[mid].Latitude, locs_df.loc[mid].Longitude)
+            distances = [distance.distance(coords, (locs_df.loc[m].Latitude, locs_df.loc[m].Longitude)).meters for m in locs_df.index]
+            adj_matrix[ii,:] = distances
+
+        adj_matrix_df = pd.DataFrame(adj_matrix, index=locs_df.index, columns=locs_df.index)
+        adj_matrix_df.to_csv(savepath, float_format='%.0f')
+
+    # drop invalid sensor
+    if 'D385' in adj_matrix_df.index:
+        adj_matrix_df.drop('D385', axis=0, inplace=True)
+    if 'D385' in adj_matrix_df.columns:
+        adj_matrix_df.drop('D385', axis=1, inplace=True)
+
+    # 'inf' or 'nan' should be used for 'no edges' rather than 0
+    # (except for diagonal entries)
+    adj_matrix_df[adj_matrix_df == 0] = np.inf
+    for ii in range(adj_matrix_df.shape[0]):
+        adj_matrix_df.iloc[ii,ii] = 0
+
+    # apply distance threshold for edges
+    if thres is not None:
+        adj_matrix_df[adj_matrix_df >= thres] = np.inf
+
+    # max number of neighbors we want to allow (we are keeping the
+    # graph undirected for now, so we are cutting off edges both in
+    # rows and columns i.e. if we remove e_ij, then we remove e_ji as
+    # well).
+    if n_max is not None:
+        if 1 <= n_max <= adj_matrix_df.shape[0] - 1:
+            idx = adj_matrix_df.values.argsort(axis=1)
+            for ii in range(adj_matrix_df.shape[0]):
+                adj_matrix_df.iloc[ii, idx[ii, n_max+1:]] = np.inf
+                adj_matrix_df.iloc[idx[ii, n_max+1:], ii] = np.inf
+
+    adj_matrix_df[np.isinf(adj_matrix_df.values)] = 0
+
+    return adj_matrix_df
+
+
 def find_by_id(idname):
 	locfiles = glob('./data/kaiterra_field*.csv')
 	for fpath in locfiles:
