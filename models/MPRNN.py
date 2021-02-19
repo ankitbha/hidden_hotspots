@@ -6,6 +6,7 @@ import torch.optim as optim
 import numpy as np
 from models.GRNN import *
 
+
 class MP_THIN(nn.Module):
 	def __init__(self, hsize):
 		super(MP_THIN, self).__init__()
@@ -21,6 +22,7 @@ class MP_THIN(nn.Module):
 	def upd(self, hself, msg):
 		hcat = torch.cat([hself, msg], -1)
 		return self.upd_op(hcat)
+
 
 class MP_DENSE(MP_THIN):
 	def __init__(self, hsize):
@@ -41,12 +43,31 @@ class MP_DENSE(MP_THIN):
 			nn.Dropout(0.5),
 		)
 
+
 class MPRNN(GRNN):
-	'''
-	Instantiates one RNN per location in input graph.
+	'''Instantiates one RNN per location in input graph.
 	Additionally, instantiates a message passing layer per node.
 
-	MPNs are specified by the given adjacency matrix (list?).
+	MPNs are specified by the given adjacency matrix.
+
+	nodes: list of nodes
+
+	adj: adjacency matrix (as a pandas dataframe) denoting
+	pairwise distances. If it's boolean, then it's taken to be
+	unweighted graph.
+
+	hidden_size: number of nodes in hidden layer (default: 256)
+
+	rnnmdl: the RNN model (RNN_MIN, RNN, RNN_SNG, RNN_FCAST) (default: RNN_MIN)
+
+	mpnmdl: the MP model (MP_THIN, MP_DENSE) (default: MP_THIN)
+
+	single_mpn: whether to use a single MP model for all
+	nodes. False means use a unique MP model for each
+	node. (default: False)
+
+	verbose: verbose output (default: False)
+
 	'''
 
 	name = 'mprnn'
@@ -59,152 +80,90 @@ class MPRNN(GRNN):
 		verbose=False):
 		super().__init__(len(nodes), hidden_size, rnnmdl)
 
-		self.adj = adj
 		self.nodes = nodes
+		self.adj = adj
 
-		# follows a canonical order as defined by input order of nodes
+		# whether to define a single global messaging rule for
+		# all nodes, or one for each
 		self.single_mpn = single_mpn
 
-		mpns_list = []
-		self.mpn_ind = {}
+		# for every node that has at least neighbor, either a
+		# define a new MPN model (if single_mpn is False) else
+		# assign the MPN model (if single_mpn is True)
+		self.mpn_dict = nn.ModuleDict()
 		if single_mpn:
-			# defines a single global messaging rule for all nodes
-			mpns_list = [mpnmdl(hsize=hidden_size)]
+			mpn = mpnmdl(hsize=hidden_size)
 			for nname in nodes:
-				#adjnames = adj[nname]
-                                adjnames = adj.columns[adj.loc[nname] > 0]
-				if len(adjnames):
-					self.mpn_ind[nname] = 0
+				if (adj.loc[nname] > 0).any():
+					self.mpn_dict.add_module(nname, mpn)
 		else:
 			for nname in nodes:
-				#adjnames = adj[nname]
-                                adjnames = adj.columns[adj.loc[nname] > 0]
-				if len(adjnames):
-					self.mpn_ind[nname] = len(mpns_list)
-					mpns_list.append(mpnmdl(hsize=hidden_size))
-		self.mpns = nn.ModuleList(mpns_list)
-		self.mpns_list = mpns_list
+				if (adj.loc[nname] > 0).any():
+					self.mpn_dict.add_module(nname, mpnmdl(hsize=hidden_size))
 
-
-		self.stats=dict(
-			noadj={},
-		)
 		if verbose:
 			print('MPRNN')
 			print(' [*] Defined over: {} nodes'.format(len(nodes)))
-			print(' [*] Contains    : {} adjs'.format(len(adj)))
+			print(' [*] Contains	: {} adjs'.format(len(adj)))
 
-	def ckpt_path(self, hops=None):
-		if hops is None:
-			hops = self.hops
-
-		sfile = os.path.join('checkpoints', '{}/{}_n{}.pth'.format(
-			self.name,
-			self.nodes[0],
-			hops))
-		return sfile
-
-	def load_prior(self):
-		if self.hops == 1:
-			print('WARN: No hops lower than 1')
-			return
-
-		wpath = self.ckpt_path(hops=self.hops-1)
-
-		print('Transfer:', wpath)
-
-		pdict = torch.load(wpath)
-
-		self_dict = self.state_dict()
-		match = 0
-		for k, v in self_dict.items():
-			if k in pdict:
-				match += 1
-				self_dict[k] = pdict[k]
-		self.load_state_dict(self_dict)
-
-		print('Matched: {} params'.format(match))
-
-	def load(self, wpath=None, verbose=True):
-		if wpath is None:
-			wpath = self.ckpt_path()
-
-		if verbose: print('Loading:', wpath)
-		self.load_state_dict(torch.load(wpath))
-
-	def save(self, wpath=None):
-		if wpath is None:
-			wpath = self.ckpt_path()
-		print('Saving to:', wpath)
-		torch.save(self.state_dict(), wpath)
-
-	def clear_stats(self):
-		pass
-		# self.msgcount = [0 for _ in self.nodes]
-		# self.updcount = [0 for _ in self.nodes]
-
-	def print_stats(self):
-		pass
-		# for ni, nname in enumerate(self.nodes):
-		# 	print('Node:', nname)
-		# 	print('  * Msgs received: %d' % self.msgcount[ni])
-		# 	print('  * Msgs updated : %d' % self.updcount[ni])
-
-	def eval_hidden(self, ti, nodes, hidden):
-		hevals = []
-		for ni, (node_series, rnn, hdn) in enumerate(zip(nodes, self.rnns, hidden)):
+	def eval_input(self, ti, series):
+		# at every node, evaluate the first RNN layer on the
+		# input and produce the hidden layer output
+		hevals = dict()
+		for ni, (node_series, rnn, nname) in enumerate(zip(series, self.rnns, self.nodes)):
 			value_t = node_series[ti]
 			hout = rnn.inp(value_t)
-			hevals.append(hout)
+			hevals[nname] = hout
 		return hevals
 
 	def eval_message(self, hevals):
-		msgs = []
-		for ni, (hval, nname) in enumerate(zip(hevals, self.nodes)):
+		# for each node that has at least one neighbor,
+		# compute a message for each of that node's neighbors
+		# using the hidden layer outputs both the node and the
+		# neighbor
+		msgs = dict()
+		for nname in self.nodes:
 			# only defined over nodes w/ adj
-			#if not len(self.adj[nname]):
-                        if not len(self.adj.loc[nname]):
-				self.stats['noadj'][nname] = True
-				msgs.append(None)
+			if not nname in self.mpn_dict:
+				msgs[nname] = None
 				continue
 
-			mpn = self.mpns[self.mpn_ind[nname]]
+			# compute message by reading the hidden layer
+			# outputs of neighbors. instead of just
+			# summing up all the messages (which was done
+			# for the traffic problem), do a weighted sum
+			# based on the edge weights
 			many = []
-			#ninds = [self.nodes.index(neighb) for neighb in self.adj[nname]]
-                        ninds = [self.nodes.index(neighb) for neighb in self.adj.loc[nname]]
-			assert len(ninds)
-			for neighbor_i in ninds:
-				many.append(mpn.msg(hval, hevals[neighbor_i]))
+			denom = 0
+			neighbors = self.adj.columns[self.adj.loc[nname] > 0]
+			for neighbor in neighbors:
+				dist = self.adj.loc[nname,neighbor]
+				denom += (1/dist**2)
+				many.append(self.mpn_dict[nname].msg(hevals[nname], hevals[neighbor]) / dist**2)
 			many = torch.stack(many, -1)
-			msg = torch.sum(many, -1)
-			msgs.append(msg)
+			msg = torch.sum(many, -1) / denom
+			msgs[nname] = msg
 
-			# self.msgcount[ni] += 1
 		return msgs
 
 	def eval_update(self, hevals, msgs):
-		for ni, (hval, msg, nname) in enumerate(zip(hevals, msgs, self.nodes)):
+		for nname in self.nodes:
 			# only defined over nodes w/ adj
-			if msg is None: continue
-			mpn = self.mpns[self.mpn_ind[nname]]
+			if msgs[nname] is None: continue
 
 			# replaces hvalues before update
-			hevals[ni] = mpn.upd(hval, msg)
-
-			# self.updcount[ni] += 1
+			hevals[nname] = self.mpn_dict[nname].upd(hevals[nname], msgs[nname])
 
 	def eval_readout(self, hevals, hidden):
 		values_t = []
-		for ni, (hval, rnn, hdn) in enumerate(zip(hevals, self.rnns, hidden)):
-
-			hin = hval.unsqueeze(0)
+		for ni, (nname, rnn, hdn) in enumerate(zip(self.nodes, self.rnns, hidden)):
+			hin = hevals[nname].unsqueeze(0)
 			hout, hdn = rnn.rnn(hin, hdn)
 			hidden[ni] = hdn # replace previous lstm params
 			hout = hout.squeeze(0)
-
 			xout = rnn.out(hout)
-
 			values_t.append(xout)
+
 		return values_t
 
 	def forward(self, series, hidden=None, dump=False):
@@ -215,10 +174,8 @@ class MPRNN(GRNN):
 		if hidden is None:
 			bsize = series[0][0].size()[0]
 			hshape = (1, bsize, self.hidden_size)
-			hidden = [(
-					torch.rand(*hshape).to(self.device),
-					torch.rand(*hshape).to(self.device)
-				) for _ in range(len(series))]
+			hidden = [(torch.rand(*hshape).to(self.device),
+				   torch.rand(*hshape).to(self.device)) for _ in range(len(series))]
 
 		# defined over input timesteps
 		tsteps = len(series[0])
@@ -226,7 +183,7 @@ class MPRNN(GRNN):
 		for ti in range(tsteps):
 
 			# eval up to latent layer for each node
-			hevals = self.eval_hidden(ti, series, hidden)
+			hevals = self.eval_input(ti, series)
 
 			# message passing
 			msgs = self.eval_message(hevals)
@@ -250,7 +207,7 @@ class MPRNN(GRNN):
 			return out
 
 	def params(self, lr=0.001):
-		criterion = nn.MSELoss().cuda()
+		criterion = nn.MSELoss(reduction='sum').cuda()
 		opt = optim.Adam(self.parameters(), lr=lr)
 		sch = optim.lr_scheduler.StepLR(opt, step_size=2, gamma=0.5)
 		return criterion, opt, sch
