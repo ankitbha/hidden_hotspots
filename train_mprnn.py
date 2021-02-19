@@ -11,183 +11,159 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from utils import frac_type, prettyprint_args
+from datasets import get_adjacency_matrix, get_locations
+from models import MPRNN
+from models.temporal import RNN
 from geopy import distance
 from torch.utils import data
 from torch.autograd import Variable
 
-class PMDataset(data.Dataset):
-    """ Dataset generator for PM data. """
-    def __init__(self, data, source, thres=None, n_max=None, batch_size=1):
-        # prepare the dataset now
-        self.source = source
-        self.thres = thres
-        self.n_max = n_max
-        self.bsize = batch_size
-        self.adj_matrix_df = self.get_adjacency_matrix()
-        self.index_mid = data.index.levels[0]
-        self.index_ts = data.index.levels[1]
-        self.data = data.values.reshape((self.index_ts.size, self.index_mid.size), order='F')
 
-    def get_adjacency_matrix(self):
-        """'source': None/'combined', 'kaiterra' or 'govdata' (default: None)
+def generate_batch(data, histlen=8):
+    """Data is an unstacked dataframe -- index is timestamp, columns are
+    monitor locations.
 
-        'thres': threshold distance in meters (default: None)
-
-        'n_max': max number of neighbors (default: None)
-
-        TODO: Should the graph be undirected or directed?  That is, is it
-        ok for sensor A to be in the influence ilst of B, but not
-        vice-versa? I think it should directed, esp if we take into
-        account wind direction. If it directed, then the adj matrix is no
-        longer symmetric.
-
-        """
-
-        if self.source is None:
-            self.source = 'combined'
-        savepath = os.path.join('data', '{}_distances.csv'.format(self.source))
-
-        if os.path.exists(savepath):
-            adj_matrix_df = pd.read_csv(savepath, index_col=[0])
-        else:
-            locs_df = get_locations(self.source)
-            adj_matrix = np.empty((locs_df.index.size, locs_df.index.size), dtype=np.float64)
-
-            for ii, mid in enumerate(locs_df.index):
-                coords = (locs_df.loc[mid].Latitude, locs_df.loc[mid].Longitude)
-                distances = [distance.distance(coords, (locs_df.loc[m].Latitude, locs_df.loc[m].Longitude)).meters for m in locs_df.index]
-                adj_matrix[ii,:] = distances
-
-            adj_matrix_df = pd.DataFrame(adj_matrix, index=locs_df.index, columns=locs_df.index)
-            adj_matrix_df.to_csv(savepath, float_format='%.0f')
-
-        # drop invalid sensor
-        if self.source is None or self.source in ('combined', 'kaiterra'):
-            adj_matrix_df.drop('D385', axis=0, inplace=True)
-            adj_matrix_df.drop('D385', axis=1, inplace=True)
-
-        # 'inf' or 'nan' should be used for 'no edges' rather than 0
-        # (except for diagonal entries)
-        adj_matrix_df[adj_matrix_df == 0] = np.inf
-        for ii in range(adj_matrix_df.shape[0]):
-            adj_matrix_df.iloc[ii,ii] = 0
-
-        # apply distance threshold for edges
-        if self.thres is not None:
-            adj_matrix_df[adj_matrix_df >= self.thres] = np.inf
-
-        # max number of neighbors we want to allow (we are keeping the
-        # graph undirected for now, so we are cutting off edges both in
-        # rows and columns i.e. if we remove e_ij, then we remove e_ji as
-        # well).
-        if self.n_max is not None:
-            if 1 <= self.n_max <= adj_matrix_df.shape[0] - 1:
-                idx = adj_matrix_df.values.argsort(axis=1)
-                for ii in range(adj_matrix_df.shape[0]):
-                    adj_matrix_df.iloc[ii, idx[ii, self.n_max+1:]] = np.inf
-                    adj_matrix_df.iloc[idx[ii, self.n_max+1:], ii] = np.inf
-
-        adj_matrix_df[np.isinf(adj_matrix_df.values)] = 0
-
-        return adj_matrix_df
-
-    def __len__(self):
-        return self.data.shape[0]
-
-    def __getitem__(self, index):
-        return self.data[index,:]
-
-    def generator(self):
-        return data.DataLoader(self, batch_size=self.bsize, num_workers=2)
-
-    pass
+    """
+    n2t = lambda arr: torch.from_numpy(np.array(arr)).float()
+    for ii in range(data.shape[0]-histlen):
+        batch = data.iloc[ii:ii+histlen+1,:].values
+        if np.isfinite(batch).all():
+            X = batch[:histlen,:].T
+            Xt = [[n2t(step).unsqueeze(0).unsqueeze(0) for step in node] for node in X]
+            Y = batch[1:histlen+1,:]
+            Yt = n2t(np.array([Y]))
+            yield Xt, Yt
 
 
-def get_locations(source=None):
+def train(nodes, data, adj, rnn_model=RNN.RNN_MIN,
+          mpn_model=MPRNN.MP_THIN, single_mpn=False, val_split=0.8,
+          nepochs=10, hiddensize=128, histlen=8, lr=0.001, seed=0,
+          savepath_prefix=None, logfile=None):
+    """Provide training data and adj info and other training params."""
 
-    fpath_kai = os.path.join('data', 'kaiterra', 'kaiterra_locations.csv')
-    fpath_gov = os.path.join('data', 'govdata', 'govdata_locations.csv')
-    
-    if source == 'combined' or source is None:
-        locs_df_kai = pd.read_csv(fpath_kai, usecols=[0,2,3,4], index_col=[0])
-        locs_df_gov = pd.read_csv(fpath_gov, index_col=[0])
-        locs_df = pd.concat([locs_df_kai, locs_df_gov], axis=0, sort=False)
-    elif source == 'kaiterra':
-        locs_df = pd.read_csv(fpath_kai, usecols=[0,2,3,4], index_col=[0])
-    elif source == 'govdata':
-        locs_df = pd.read_csv(fpath_gov, index_col=[0])
+    # TODO: handle missing data
 
-    locs_df.sort_index(inplace=True)
+    # TODO: do cross-validation
 
-    return locs_df
+    # select only the nodes requested
+    data = data[nodes] / 100.0
+    adj = adj.loc[nodes, nodes]
 
+    # training and validation sets
+    val_start_ind = int(val_split * data.shape[0])
+    data_train = data.iloc[:val_start_ind,:]
+    data_val = data.iloc[val_start_ind:,:]
 
-def load_data(fpath, sensor, split=0.8, fpath_test=None):
-
-    # load the data
-    df = pd.read_csv(fpath, index_col=[0,1], parse_dates=True)
-    
-    # data is a pd.Series now
-    data = df[sensor]
-    data.sort_index(inplace=True)
-    
-    if fpath_test is None:
-        data_train, data_test = [], []
-        grouped = data.groupby(level=0)
-        for name, group in grouped:
-            N = int(split * group.shape[0])
-            group_train, group_test = group.iloc[:N], group.iloc[N:]
-            data_train.append(group_train)
-            data_test.append(group_test)
-        data_train = pd.concat(data_train, axis=0, sort=False)
-        data_test = pd.concat(data_test, axis=0, sort=False)
-    else:
-        data_train = data
-        data_test = pd.read_csv(fpath_test, index_col=[0,1], parse_dates=True)
-        data_test = data_test[sensor]
-
-    return data_train, data_test
-
-
-def prettyprint_args(ns, outfile=sys.stdout):
-    print('\nInput argument --', file=outfile)
-
-    for k,v in ns.__dict__.items():
-        print('{}: {}'.format(k,v), file=outfile)
-
-    print(file=outfile)
-    return
-
-
-def frac_type(arg):
-    try:
-        val = float(arg)
-        if val <= 0 or val >= 1:
-            raise ValueError
-    except ValueError:
-        raise argparse.ArgumentTypeError('train-test split should be in (0,1)')
-    return val
-
-
-def train(args, logfile=None):
-
-    DENSE = False
-    EPS = 120
-    LAG = 24 + 1
-    HSIZE = 128
-
-    
-    
-    # use cuda if available
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    
     # set random seed to 0 for now
-    seed = 0
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    return
+    mprnn = MPRNN.MPRNN(nodes, adj, hiddensize, rnn_model, mpn_model, single_mpn, verbose=True)
+
+    # use cuda if available
+    if torch.cuda.is_available():
+        mprnn = mprnn.cuda()
+        device = torch.device('cuda:0')
+    else:
+        device = torch.device('cpu')
+
+    mprnn.device = device
+    criterion, opt, sch = mprnn.params(lr=lr)
+
+    eval_best = {'rmse' : np.inf, 'mape' : np.inf, 'epoch' : 0}
+    savepath_best = None
+
+    max_batches = None
+
+    for epoch in range(nepochs):
+
+        disp_string = '== EPOCH {}/{} =='.format(epoch+1, nepochs)
+        print(disp_string)
+        if logfile is not None:
+            print(disp_string, file=logfile)
+
+        # training
+        mprnn.train()
+        train_loss_total = 0
+        train_count_total = 0
+        train_ape_total = 0
+        for ii, (Xt, Yt) in enumerate(generate_batch(data_train, histlen)):
+
+            if ii == max_batches:
+                break
+
+            preds = mprnn(Xt)
+            loss = criterion(preds, Yt)
+            train_loss_total += loss.item()
+            train_count_total += Yt.numel()
+
+            preds = preds.detach().squeeze().numpy()
+            Yt = Yt.detach().squeeze().numpy()
+            train_ape_total += np.abs((preds - Yt) / Yt).sum()
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+            sys.stdout.write('\rTraining batch {}/{}'.format(ii+1, data_train.shape[0]-histlen))
+
+        rmse_train = np.sqrt(train_loss_total / train_count_total)
+        mape_train = train_ape_total * 100.0 / train_count_total
+
+        disp_string = 'RMSE train: {:.4f}, MAPE train: {:.4f} %'.format(rmse_train, mape_train)
+        print(os.linesep + disp_string)
+
+        if logfile is not None:
+            print(disp_string, file=logfile)
+        
+        # evaluation
+        mprnn.eval()
+        eval_loss_total = 0
+        eval_count_total = 0
+        eval_ape_total = 0
+        with torch.no_grad():
+            for ii, (Xt, Yt) in enumerate(generate_batch(data_val), histlen):
+
+                if ii == max_batches:
+                    break
+
+                preds = mprnn(Xt)
+                loss = criterion(preds, Yt)
+                eval_loss_total += loss.item()
+                eval_count_total += Yt.numel()
+
+                preds = preds.detach().squeeze().numpy()
+                Yt = Yt.detach().squeeze().numpy()
+                eval_ape_total += np.abs((preds - Yt) / Yt).sum()
+
+                sys.stdout.write('\rValidation batch {}/{}'.format(ii+1, data_val.shape[0]-histlen))
+
+            rmse_eval = np.sqrt(eval_loss_total / eval_count_total)
+            mape_eval = eval_ape_total * 100.0 / eval_count_total
+
+            disp_string = 'RMSE eval: {:.4f}, MAPE eval: {:.4f} %'.format(rmse_eval, mape_eval)
+            print(os.linesep + disp_string)
+
+            if logfile is not None:
+                print(disp_string, file=logfile)
+
+            if rmse_eval < eval_best['rmse']:
+                eval_best['epoch'] = epoch
+                eval_best['rmse'] = rmse_eval
+                eval_best['mape'] = mape_eval
+
+                if savepath_prefix is not None:
+                    if savepath_best is not None:
+                        os.unlink(savepath_best + '.pth')
+                        os.unlink(savepath_best + '.txt')
+                    savepath_best = os.path.join(savepath_prefix + '_E{:03d}'.format(epoch))
+                    torch.save(mprnn.state_dict(), savepath_best + '.pth')
+                    with open(savepath_best + '.txt', 'w') as fout:
+                        fout.write('Eval best: EPOCH={}, RMSE={:.4f}, MAPE={:.4f} %'.format(epoch, rmse_eval, mape_eval))
+
+    return eval_best
 
 
 if __name__=='__main__':
@@ -195,21 +171,26 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Spatio-temporal LSTM for air quality prediction')
     parser.add_argument('fpath', help='Input data file')
     parser.add_argument('sensor', choices=('pm25', 'pm10'), help='Type of sensory data')
+    parser.add_argument('--adj-thres', default=5000, help='Threshold dist (metres) for neighborhood (default: 5000 m)')
+    parser.add_argument('--adj-nmax', help='Upper limit on number of neighbors (default: None)')
 
     megroup = parser.add_mutually_exclusive_group()
     megroup.add_argument('--split', type=frac_type, default=0.8, help='Train-test split fraction')
+    megroup.add_argument('--train-end-dt', type=pd.Timestamp, help='End datetime to mark training period')
     megroup.add_argument('--test', help='File containing test data')
 
-    parser.add_argument('--history', type=int, default=32, dest='histlen', help='Length of history')
+    parser.add_argument('--val-split', type=float, default=0.8, help='Split for validation')
+    parser.add_argument('--cross-validate', '-cv', action='store_true', default=False, help='Do cross-validation')
+    parser.add_argument('--history', type=int, default=24, dest='histlen', help='Length of history (hours)')
     parser.add_argument('--stride', type=int, default=1, help='Length of stride through data')
     parser.add_argument('--batchsize', type=int, default=32, help='Batch size')
     parser.add_argument('--hidden', type=int, default=256, help='Hidden layer size')
-    parser.add_argument('--lr', type=float, default=5e-4, help='Learning rate')
-    parser.add_argument('--epochs', type=int, default=120, help='Number of epochs for training')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training')
     parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
     args = parser.parse_args()
 
-    # confirm before beginning execution
+    # show all options and confirm before beginning execution
     prettyprint_args(args)
 
     if not args.yes:
@@ -219,26 +200,48 @@ if __name__=='__main__':
             raise SystemExit()
 
     # begin logging
-    parts = os.path.basename(args.fpath).rsplit('_', 4)
-    source = parts[0].split('_')[0]
-    resolution = parts[1]
-    start_date, end_date = parts[2], parts[3]
+    # parts = os.path.basename(args.fpath).rsplit('_', 4)
+    # source = parts[0].split('_')[0]
+    # resolution = parts[1]
+    # start_date, end_date = parts[2], parts[3]
+    savedir = os.path.join('output', 'mprnn')
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+    logfilepath_prefix = os.path.join(savedir, 'mprnn_{}_{}'.format(args.sensor, pd.Timestamp.now().strftime('%Y%m%d%H%M')))
+
+    # read in the data
+    data = pd.read_csv(args.fpath, index_col=[0,1], parse_dates=True)[args.sensor]
+    data = data.unstack(level=0)
+    data.sort_index(axis=1, inplace=True)
+    data.drop('EastArjunNagar_CPCB', axis=1, inplace=True, errors='ignore')
     
-    savepath = os.path.join('output', 'mprnn', '{}_{}.log'.format(source, args.sensor))
-    if not os.path.exists(savepath):
-        os.makedirs(os.path.dirname(savepath))
+    nodes = data.columns
+    res = data.index[1] - data.index[0]
+
+    # get the adjacency matrix
+    adj_matrix = get_adjacency_matrix('data', thres=args.adj_thres, n_max=args.adj_nmax)
+
+    # split into train and test
+    if args.train_end_dt is not None:
+        data_train = data.loc[:(args.train_end_dt - res),:]
+        data_test = data.loc[args.train_end_dt:,:]
+    elif args.test is not None:
+        data_train = data
+        data_test = pd.read_csv(args.test, index_col=[0,1], parse_dates=True)[args.sensor]
+        data_test = data_test.unstack(level=0)
+        data_test.sort_index(axis=1, inplace=True)
+        data_test.drop('EastArjunNagar_CPCB', axis=1, inplace=True, errors='ignore')
+        assert data_test.index[0] > data_train.index[-1]
+        assert data_test.shape[1] == data_train.shape[1]
+        assert (data_test.columns == data_train.columns).all()
     else:
-        if not args.yes:
-            confirm = input('Output savepath {} already exists. Overwrite? (y/n) ')
-            if confirm.strip().lower() != 'y':
-                print('Aborting program. Please rename existing file or provide alternate name for saving.')
-                raise SystemExit()
-
-    data_train, data_test = load_data(args.fpath, args.sensor, args.split, args.test)
-
-    dataset_train
+        train_end_ind = int(args.split*data.shape[0])
+        data_train = data.iloc[:train_end_ind,:]
+        data_test = data.iloc[train_end_ind:,:]
 
     # run the training
-    # with open(savepath, 'w') as fout:
-    #     prettyprint_args(args, outfile=fout)
-    #     train(args, logfile=fout)
+    with open(logfilepath_prefix + '.log', 'w') as fout:
+        prettyprint_args(args, outfile=fout)
+        eval_best = train(nodes, data_train, adj_matrix, val_split=args.val_split, savepath_prefix=logfilepath_prefix, logfile=fout)
+
+    print(eval_best)
