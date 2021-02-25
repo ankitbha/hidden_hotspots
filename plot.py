@@ -8,6 +8,7 @@ import glob
 import sys
 import os
 
+from datasets import get_data
 from tqdm import tqdm
 from pandas.plotting import register_matplotlib_converters
 
@@ -18,8 +19,73 @@ plt.rc('pdf', use14corefonts=True)
 
 import tilemapbase
 
-tilemapbase.start_logging()
 tilemapbase.init()
+tilemapbase.start_logging()
+
+
+def plot_availability(sensor, res, start_date=None, end_date=None, save=False, disp=True):
+
+    # if source in ('kaiterra', 'govdata'):
+    #     data = get_data('data', source, sensor, res, start_date, end_date)
+    # elif source == 'combined':
+    data_kai = get_data('data', 'kaiterra', sensor, res, start_date, end_date)
+    data_gov = get_data('data', 'govdata', sensor, res, start_date, end_date)
+    data = pd.concat([data_kai, data_gov], axis=0, sort=False)
+    # else:
+    #     print('Cannot recognize source name.')
+    #     return
+
+    # display availability based on percent counts
+    grouped_kai = data_kai.groupby(level=0)
+    validfracs_kai = (grouped_kai.count() / grouped_kai.size())
+    validfracs_kai.sort_values(ascending=True, inplace=True)
+
+    grouped_gov = data_gov.groupby(level=0)
+    validfracs_gov = (grouped_gov.count() / grouped_gov.size())
+    validfracs_gov.sort_values(ascending=True, inplace=True)
+
+    grouped = data.groupby(level=0)
+    validfracs = (grouped.count() / grouped.size())
+    validfracs.sort_values(ascending=True, inplace=True)
+
+    # qt1 = np.percentile(validfracs.values, 25)
+    # qt2 = np.percentile(validfracs.values, 50)
+    # qt3 = np.percentile(validfracs.values, 75)
+
+    plt.rc('font', size=40)
+    plt.rc('ps', useafm=True)
+    plt.rc('pdf', use14corefonts=True)
+    
+    fig = plt.figure(figsize=(12,9))
+    ax = fig.add_subplot(111)
+    ax.plot(validfracs_kai.values, np.arange(1, validfracs_kai.size+1)/validfracs_kai.size, lw=2, label='Sensors')
+    ax.plot(validfracs_gov.values, np.arange(1, validfracs_gov.size+1)/validfracs_gov.size, lw=2, label='Govt')
+    ax.plot(validfracs.values, np.arange(1, validfracs.size+1)/validfracs.size, lw=2, label='All')
+    # xmin, xmax = ax.get_xlim()
+    # plt.vlines([qt1], xmin, xmax, colors='r', linestyles='--', lw=2, label=r'$Q_1$')
+    # plt.vlines([qt2], xmin, xmax, colors='b', linestyles='--', lw=2, label=r'$Q_2$')
+    # plt.vlines([qt3], xmin, xmax, colors='g', linestyles='--', lw=2, label=r'$Q_3$')
+    # plt.xlim(xmin, xmax)
+    ax.xaxis.set_major_locator(plt.MaxNLocator(4, prune='both'))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(5, prune='both'))
+    ax.tick_params(length=20, pad=10)
+    #plt.xlabel('The {} sensors in our deployment'.format(validfracs.size), labelpad=20)
+    ax.set_xlabel('Fraction of data availability (%)', labelpad=20)
+    #plt.ylabel('Available data fraction', labelpad=20)
+    ax.legend(ncol=1, fancybox=True, fontsize='small')
+    fig.tight_layout()
+    #plt.savefig('data/datagaps_kaiterra_fieldeggs_2019_Feb_28_bar.eps')
+
+    if save:
+        fig.savefig('figures/avail_{}_{}_{}.eps'.format(sensor, start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d')))
+        #fig.savefig('figures/avail_{}_{}_{}.pdf'.format(sensor, start_date, end_date))
+
+    if disp:
+        plt.show()
+    
+    plt.close(fig)
+
+    pass
 
 
 def plot_hotspot_profile(fpath, start_dt=None, end_dt=None, save=False, disp=True):
@@ -87,7 +153,7 @@ def plot_locs(tile=tilemapbase.tiles.Stamen_Toner_Background, labels=False, save
     locs_gov['Type'] = 'Govt'
     locs = pd.merge(locs_kai, locs_gov, how='outer', on=['Monitor ID', 'Latitude', 'Longitude', 'Location', 'Type'], copy=False)
     lon_min, lat_min = locs.Longitude.min(), locs.Latitude.min()
-    lon_max, lat_max = locs.Longitude.min(), locs.Latitude.max()
+    lon_max, lat_max = locs.Longitude.max(), locs.Latitude.max()
     lon_center, lat_center = locs.Longitude.mean(), locs.Latitude.mean()
     lat_pad = 1.1 * max(lat_center - lat_min, lat_max - lat_center)
     lon_pad = 1.1 * max(lon_center - lon_min, lon_max - lon_center)
@@ -730,14 +796,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # type of plot
-    plot_types = ['hotspot_profile',
-                  'locs',
-                  'linear_model',
-                  'scatter_1nn',
-                  'cluster_freqbuckets',
-                  'hotspots_temporal_binary',
-                  'hotspots_temporal_totalcount',
-                  'pm_map']
+    plot_types = ['locs',
+                  'availability', 
+                  'linear_model', 
+                  'scatter_1nn', 
+                  'cluster_freqbuckets', 
+                  'hotspots_temporal_binary', 
+                  'hotspots_temporal_totalcount', 
+                  'pm_map', 
+                  'hotspot_profile']
+
     if not args.plot in plot_types:
         print('Specify a plot type from the following.', file=sys.stderr)
         print(plot_types)
@@ -751,33 +819,18 @@ if __name__ == '__main__':
         else:
             save_response = False
 
-    if args.plot == 'hotspot_profile':
-        fpath = args.arguments[0]
-
-        start_dt = end_dt = None
-        nn = 1
-        while nn < len(args.arguments):
-            opt = args.arguments[nn]
-            val = pd.Timestamp(args.arguments[nn+1], tz=pytz.FixedOffset(330))
-            if opt == '-S' or opt == '--start-dt':
-                start_dt = val
-            elif opt == '-E' or opt == '--end-dt':
-                end_dt = val
-            else:
-                print('Option should be either \'-s/--start-dt\' or \'-e/--end-dt\'', file=sys.stderr)
-                sys.exit(-1)
-            nn += 2
-        # mid = None
-        # if len(args.arguments) == 2:
-        #     mid = args.arguments[1]
-        # elif len(args.arguments) > 2:
-        #     print('Only two arguments allowed: path to table, and (optionally) monitor ID', file=sys.stderr)
-        #     sys.exit(-1)
-        plot_hotspot_profile(fpath, start_dt, end_dt, save_response, args.disp)
-    elif args.plot == 'locs':
+    if args.plot == 'locs':
         tile = tilemapbase.tiles.build_OSM()
         labels = False
         plot_locs(tile, labels, save_response, args.disp)
+
+    elif args.plot == 'availability':
+        sensor = args.arguments[0]
+        assert sensor in ('pm25', 'pm10')
+        res = args.arguments[1]
+        start_date = pd.Timestamp(args.arguments[2])
+        end_date = pd.Timestamp(args.arguments[3])
+        plot_availability(sensor, res, start_date, end_date, save=save_response, disp=args.disp)
     
     elif args.plot == 'linear_model':
         mids_list = ['CBC7', 'A9BE', 'C0A7', '72CA', 'BC46', '20CA', 'EAC8', '113E', 'E8E4', '603A']
@@ -791,7 +844,6 @@ if __name__ == '__main__':
         plot_bars_mid_quant_bestperf(mids_list, args.source, args.sensor, 'v2')
     
     elif args.plot == 'scatter_1nn':
-
         mids1_list = np.loadtxt('data/kaiterra/kaiterra_fieldeggid_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
         mids2_list = np.loadtxt('data/govdata/govdata_locations.csv', delimiter=',', dtype=str, skiprows=1, usecols=[0])
         
@@ -843,3 +895,27 @@ if __name__ == '__main__':
             sys.exit(-1)
 
         plot_values_map(args.source, args.sensor, res, start_date, end_date, save=save_response, disp=args.disp)
+
+    elif args.plot == 'hotspot_profile':
+        fpath = args.arguments[0]
+
+        start_dt = end_dt = None
+        nn = 1
+        while nn < len(args.arguments):
+            opt = args.arguments[nn]
+            val = pd.Timestamp(args.arguments[nn+1], tz=pytz.FixedOffset(330))
+            if opt == '-S' or opt == '--start-dt':
+                start_dt = val
+            elif opt == '-E' or opt == '--end-dt':
+                end_dt = val
+            else:
+                print('Option should be either \'-s/--start-dt\' or \'-e/--end-dt\'', file=sys.stderr)
+                sys.exit(-1)
+            nn += 2
+        # mid = None
+        # if len(args.arguments) == 2:
+        #     mid = args.arguments[1]
+        # elif len(args.arguments) > 2:
+        #     print('Only two arguments allowed: path to table, and (optionally) monitor ID', file=sys.stderr)
+        #     sys.exit(-1)
+        plot_hotspot_profile(fpath, start_dt, end_dt, save_response, args.disp)
