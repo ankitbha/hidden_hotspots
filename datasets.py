@@ -15,12 +15,41 @@
 import os, sys
 import numpy as np
 import pandas as pd
-import torch
 #from configs import *
 from glob import glob
 from datetime import datetime, timedelta
 import time
 import json
+
+KAITERRA_CURRENT_SUFFIX = '20180501_20201101'
+GOVDATA_CURRENT_SUFFIX = '20180501_20201101'
+
+
+def get_data(datadir, source, sensor, res, start_date=None, end_date=None):
+    
+    if source == 'kaiterra':
+        fpath = os.path.join(datadir, 'kaiterra', 'kaiterra_fieldeggid_{}_{}_panel.csv'.format(res, KAITERRA_CURRENT_SUFFIX))
+        _, data_start_date, data_end_date, _ = os.path.basename(fpath).rsplit('_', 3)
+    elif source == 'govdata':
+        fpath = os.path.join(datadir, 'govdata', 'govdata_{}_{}.csv'.format(res, GOVDATA_CURRENT_SUFFIX))
+        _, data_start_date, data_end_date = os.path.basename(fpath)[:-4].rsplit('_', 2)
+
+    data_start_date, data_end_date = pd.Timestamp(data_start_date), pd.Timestamp(data_end_date)
+    if start_date is not None:
+        if start_date > data_end_date:
+            return None
+        elif start_date < data_start_date:
+            start_date = None
+    if end_date is not None:
+        if end_date < data_start_date:
+            return None
+        elif end_date > data_end_date:
+            end_date = None
+
+    data = pd.read_csv(fpath, index_col=[0,1], parse_dates=True)
+    data = data.loc[(slice(None), slice(start_date, end_date)), sensor]
+
+    return data
 
 
 def get_locations(datadir):
