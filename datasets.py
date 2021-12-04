@@ -52,7 +52,7 @@ def get_data(datadir, source, sensor, res, start_date=None, end_date=None):
     return data
 
 
-def get_locations(datadir):
+def get_locations(datadir, source=None):
 
     fpath_kai = os.path.join(datadir, 'kaiterra', 'kaiterra_locations.csv')
     fpath_gov = os.path.join(datadir, 'govdata', 'govdata_locations.csv')
