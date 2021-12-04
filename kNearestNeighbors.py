@@ -194,15 +194,14 @@ if __name__=='__main__':
     basename = os.path.basename(args.datafilepath)
     if basename.startswith('kaiterra'):
         # datesuffix = '_'.join(basename.split('_')[3:6])
-        savedir = 'datasets/knn_{}_kaiterra/'.format(args.version)
+        savedir = 'datasets/knn_new_{}_kaiterra/'.format(args.version)
         NAME = 'kaiterra'
     else:
-        savedir = 'datasets/knn_{}_govdata/'.format(args.version)
+        savedir = 'datasets/knn_new_{}_govdata/'.format(args.version)
         NAME = 'gov'
     
     if os.path.exists(savedir):
         print('Error! Dataset already exists for "{}" in {}. Please remove/move/rename it and run again.'.format(NAME, savedir), file=sys.stderr)
-        raise SystemExit
     else:
         os.makedirs(savedir)
     

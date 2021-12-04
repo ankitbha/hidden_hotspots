@@ -49,29 +49,32 @@ def test(models, version, dataset_df, test_begin):
     
     for ind in range(test_series.shape[0]):
         
-        # determine no of available sensors at this instant
-        vals = test_series.iloc[ind,1:]
-        locs, = np.where(~np.isnan(vals))
-        nfeatures = len(locs)
-        if nfeatures == 0:
-            # reset LSTM whenever there is a discontinuity
-            lstm_state = models[0].init_lstms(device=device, batch=1)
+        try:
+            # determine no of available sensors at this instant
+            vals = test_series.iloc[ind,1:]
+            locs, = np.where(~np.isnan(vals))
+            nfeatures = len(locs)
+            if nfeatures == 0:
+                # reset LSTM whenever there is a discontinuity
+                lstm_state = models[0].init_lstms(device=device, batch=1)
+                continue
+
+            K = nfeatures // dividefactor[version]
+
+            
+            point_seq = np.empty((1, nfeatures, 1))
+            point_seq[0, :, 0] = vals.values[locs]
+            point_label = np.ones((1, 1)) * test_series.iloc[ind,0]
+            
+            point_seq = np.transpose(point_seq, [2, 0, 1])
+            point_seq = Variable(torch.from_numpy(point_seq), requires_grad=True).to(device).double()
+            point_label = torch.from_numpy(point_label).unsqueeze(2).to(device)
+
+            pred, lstm_state = models[0](point_seq, lstm_state)
+
+            y_pred[ind] = pred.detach().squeeze().cpu().numpy() * 100.0
+        except:
             continue
-
-        K = nfeatures // dividefactor[version]
-
-        
-        point_seq = np.empty((1, nfeatures, 1))
-        point_seq[0, :, 0] = vals.values[locs]
-        point_label = np.ones((1, 1)) * test_series.iloc[ind,0]
-        
-        point_seq = np.transpose(point_seq, [2, 0, 1])
-        point_seq = Variable(torch.from_numpy(point_seq), requires_grad=True).to(device).double()
-        point_label = torch.from_numpy(point_label).unsqueeze(2).to(device)
-
-        pred, lstm_state = models[K-1](point_seq, lstm_state)
-
-        y_pred[ind] = pred.detach().squeeze().cpu().numpy() * 100.0
         
     return y, y_pred
 
@@ -218,6 +221,7 @@ if __name__=='__main__':
     
     # use cuda if available
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    plot_figs = False
     
     # get dataset
     df_all, _, _ = create_dataset_knn(args.source, args.sensor, args.maxneighbors, args.knn_version, args.stride, args.histlen, args.split)
@@ -233,7 +237,7 @@ if __name__=='__main__':
     numsegments_dict = {'v1':lambda K: K+1, 'v2':lambda K: 3*K+1}
     
     sys.stdout.write('Loading all the models ... ')
-    for K in tqdm(range(1, args.maxneighbors+1)):
+    for K in tqdm(range(10, args.maxneighbors+1)):
 
         model = Series(batchsize=1,
                        historylen=1,
@@ -241,7 +245,7 @@ if __name__=='__main__':
                        hiddensize=args.hidden).to(device).double()
         
         # load saved model parameters
-        savepath = 'models/model_{}_{}_K{:02d}_{}.pth'.format(args.source, args.sensor, K, args.knn_version)
+        savepath = 'models/knn/model_{}_{}_K{:02d}_{}.pth'.format(args.source, args.sensor, K, args.knn_version)
         
         if not os.path.exists(savepath):
             print('No saved model available for K = {}! Please run training script for that with these parameters first.'.format(K), file=sys.stderr)
@@ -280,29 +284,31 @@ if __name__=='__main__':
         mape = np.mean(np.fabs(np.ma.masked_invalid(y) - np.ma.masked_invalid(y_pred)) / np.ma.masked_equal(y, 0)) * 100.0
         
         errors.extend([rmse, mape])
+		print (count, monitorid, rmse, mape)
         
         # x_pm = df_v2.values[test_begin:, 1::3] * 100.0
         
-        fig = plt.figure(figsize=(14,5))
-        ax = fig.add_subplot(111)
-        fig.suptitle('Sensor: {}, K: {}, RMSE: {:.2f}, MAPE: {:.2f}'.format(monitorid, args.maxneighbors, rmse, mape))
-        ax.set_title('Test start: {}, test end: {}'.format(df.index[test_begin], df.index[-1]))
-        # for k in range(K):
-        #     ax.plot(x_pm[:, k], color='#AAAAAA')
-        ax.plot(y, label='Real')
-        ax.plot(y_pred, label='Predicted')
-        ax.set_xlabel('Time (test period)')
-        ax.set_ylabel('PM2.5 conc')
-        ax.legend()
-        # fig.tight_layout()
-        # plt.show()
-        savedf = pd.DataFrame(data=np.hstack((y[:,None], y_pred[:,None])),
-                              index=df.index[test_begin:],
-                              columns=['Actual','Predicted'])
-        savedf.to_csv('plots/test_{}_{}_K{:02d}_{}_{}.txt'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
-        fig.savefig('plots/test_{}_{}_K{:02d}_{}_{}.pdf'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
-        fig.savefig('plots/test_{}_{}_K{:02d}_{}_{}.png'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
-        plt.close(fig)
+        if plot_figs:
+            fig = plt.figure(figsize=(14,5))
+            ax = fig.add_subplot(111)
+            fig.suptitle('Sensor: {}, K: {}, RMSE: {:.2f}, MAPE: {:.2f}'.format(monitorid, args.maxneighbors, rmse, mape))
+            ax.set_title('Test start: {}, test end: {}'.format(df.index[test_begin], df.index[-1]))
+            # for k in range(K):
+            #     ax.plot(x_pm[:, k], color='#AAAAAA')
+            ax.plot(y, label='Real')
+            ax.plot(y_pred, label='Predicted')
+            ax.set_xlabel('Time (test period)')
+            ax.set_ylabel('PM2.5 conc')
+            ax.legend()
+            # fig.tight_layout()
+            # plt.show()
+            savedf = pd.DataFrame(data=np.hstack((y[:,None], y_pred[:,None])),
+                                  index=df.index[test_begin:],
+                                  columns=['Actual','Predicted'])
+            savedf.to_csv('plots/test_{}_{}_K{:02d}_{}_{}.txt'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
+            fig.savefig('plots/test_{}_{}_K{:02d}_{}_{}.pdf'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
+            fig.savefig('plots/test_{}_{}_K{:02d}_{}_{}.png'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
+            plt.close(fig)
         
         # test by combining all the models
         # df_v2, _, _ = create_dataset_knn_sensor(K, monitorid, 'v2', args.datesuffix, args.sensor, args.stride, args.histlen, args.split)
@@ -317,23 +323,24 @@ if __name__=='__main__':
         
         # x_pm = df_v2.values[test_begin:, 1::3] * 100.0
         
-        fig = plt.figure(figsize=(14,5))
-        ax = fig.add_subplot(111)
-        fig.suptitle('Sensor: {}, max K: {}, RMSE: {:.2f}, MAPE: {:.2f}'.format(monitorid, args.maxneighbors, rmse, mape))
-        ax.set_title('Test start: {}, test end: {}'.format(df.index[test_begin], df.index[-1]))
-        ax.plot(y, label='Real')
-        ax.plot(y_pred, label='Predicted')
-        ax.set_xlabel('Time (test period)')
-        ax.set_ylabel('PM2.5 conc')
-        ax.legend()
-        
-        savedf = pd.DataFrame(data=np.hstack((y[:,None], y_pred[:,None])),
-                              index=df.index[test_begin:],
-                              columns=['Actual','Predicted'])
-        savedf.to_csv('plots/test_{}_{}_maxK{:02d}_{}_{}.txt'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
-        fig.savefig('plots/test_{}_{}_maxK{:02d}_{}_{}.pdf'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
-        fig.savefig('plots/test_{}_{}_maxK{:02d}_{}_{}.png'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
-        plt.close(fig)
+        if plot_figs:
+            fig = plt.figure(figsize=(14,5))
+            ax = fig.add_subplot(111)
+            fig.suptitle('Sensor: {}, max K: {}, RMSE: {:.2f}, MAPE: {:.2f}'.format(monitorid, args.maxneighbors, rmse, mape))
+            ax.set_title('Test start: {}, test end: {}'.format(df.index[test_begin], df.index[-1]))
+            ax.plot(y, label='Real')
+            ax.plot(y_pred, label='Predicted')
+            ax.set_xlabel('Time (test period)')
+            ax.set_ylabel('PM2.5 conc')
+            ax.legend()
+            
+            savedf = pd.DataFrame(data=np.hstack((y[:,None], y_pred[:,None])),
+                                  index=df.index[test_begin:],
+                                  columns=['Actual','Predicted'])
+            savedf.to_csv('plots/test_{}_{}_maxK{:02d}_{}_{}.txt'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
+            fig.savefig('plots/test_{}_{}_maxK{:02d}_{}_{}.pdf'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
+            fig.savefig('plots/test_{}_{}_maxK{:02d}_{}_{}.png'.format(args.source, args.sensor, args.maxneighbors, args.knn_version, monitorid))
+            plt.close(fig)
         
         errorvals.append(errors)
     
