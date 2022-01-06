@@ -293,7 +293,7 @@ def average_kaiterra_data(fpath, interval, start_dt=None, end_dt=None):
     # save the final dataframe
     saveprefix = 'kaiterra_fieldeggid_{}_{}_{}'.format(interval, start_dt.strftime('%Y%m%d'), end_dt.strftime('%Y%m%d'))
     savedir = os.path.dirname(fpath)
-    data_final.to_csv(os.path.join(savedir, saveprefix + '_panel.csv'))
+    data_final.to_csv(os.path.join(savedir, saveprefix + '.csv'))
 
     # also save the data for each sensor separately
     subdir = os.path.join(savedir, saveprefix)
