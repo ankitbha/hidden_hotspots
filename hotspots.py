@@ -17,7 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import tilemapbase
-tilemapbase.init()
+tilemapbase.init(create='True')
 
 from tqdm import tqdm
 from geopy import distance
@@ -346,8 +346,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # read in the necessary data files (location and sensor data)
-    filepath_data_kai = 'data/kaiterra/kaiterra_fieldeggid_{}_current_panel.csv'.format(args.res_time)
-    filepath_data_gov = 'data/govdata/govdata_{}_current.csv'.format(args.res_time)
+#     filepath_data_kai = 'data/kaiterra/kaiterra_fieldeggid_{}_current_panel.csv'.format(args.res_time)
+#     filepath_data_gov = 'data/govdata/govdata_{}_current.csv'.format(args.res_time)
+    filepath_data_kai = 'data/kaiterra/kaiterra_fieldeggid_all_current_panel.csv'
+    filepath_data_gov = 'data/govdata/govdata_current.csv'
     filepath_locs_kai = 'data/kaiterra/kaiterra_locations.csv'
     filepath_locs_gov = 'data/govdata/govdata_locations.csv'
 

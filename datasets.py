@@ -20,6 +20,7 @@ from glob import glob
 from datetime import datetime, timedelta
 import time
 import json
+import geopy.distance as distance
 
 KAITERRA_CURRENT_SUFFIX = '20180501_20201101'
 GOVDATA_CURRENT_SUFFIX = '20180501_20201101'
