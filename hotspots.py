@@ -190,7 +190,7 @@ def get_hotspots(data, sensor, params, locs, savedir):
     #                                        lon_center + lon_pad,
     #                                        lat_center - lat_pad,
     #                                        lat_center + lat_pad)
-    D_true = distance.distance((lon_max, lat_max), (lon_min, lat_min)).km
+    D_true = distance.distance((lat_max, lon_max), (lat_min, lon_min)).km
     x_max, y_max = tilemapbase.project(lon_max, lat_max)
     x_min, y_min = tilemapbase.project(lon_min, lat_min)
     D_proj = np.sqrt((x_min - x_max)**2 + (y_min - y_max)**2)
