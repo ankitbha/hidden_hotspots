@@ -14,6 +14,7 @@ runs
 *.csv
 *.tsv
 *.eps
+*.pkl
 # C extensions
 *.so
 debug
