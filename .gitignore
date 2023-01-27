@@ -25,8 +25,6 @@ develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -123,6 +121,7 @@ venv.bak/
 *.json
 *.dta
 *.txt
+*.asc
 
 # folders
 data/
@@ -133,3 +132,4 @@ plots/
 figures/
 results/
 _archive/
+fnl_20180501_00-20201031_18_00.grib2/
