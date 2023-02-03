@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=15
 #SBATCH --time=18:00:00
 #SBATCH --mem=32GB
 #SBATCH --job-name=mle_gaussian
