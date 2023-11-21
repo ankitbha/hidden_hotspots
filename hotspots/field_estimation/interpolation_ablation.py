@@ -1,8 +1,8 @@
 import os
 import sys
+prop = sys.argv[1]
 import pytz
 import argparse
-# import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -115,16 +115,18 @@ spline_df = spline_df[spline_df['time'].isin(hours_in_day)]
 spline_mat = np.transpose(spline_df['pm25'].to_numpy().reshape((60,24))).astype(float)
 
 spline_df = pd.DataFrame(spline_mat,columns=df.columns)
+spline_df = spline_df.drop(['Pusa_IMD'], axis=1)
+df = df.drop(['Pusa_IMD'], axis=1)
+spline_df = spline_df.mean(axis=1)
 df_full = deepcopy(df)
 for idx,row in df.iterrows():
     df.loc[idx] = row-spline_df.loc[idx.hour]
 df_spline = df_full-df
 
+df_interp = deepcopy(df)
+df_null = deepcopy(df)
 
-ape = []
-itr = 0
-for idx, row in tqdm(df[4:-4].iterrows(), total=df[4:-4].shape[0]):
-    itr += 1
+def process_row(idx, row):
     window_size = 3
     i = np.where(np.array(df.index) == idx)[0][0]
     df_slice = pd.concat([df[i-window_size:i],df[i+1:i+window_size+1]])
@@ -135,9 +137,7 @@ for idx, row in tqdm(df[4:-4].iterrows(), total=df[4:-4].shape[0]):
     z_win = np.concatenate([np.arange(i-window_size,i),np.arange(i+1,i+window_size+1)])*0.01
     z_win = np.repeat(z_win,len(df.columns))
     vals_win = df_slice.values.flatten()
-    spl_win = pd.concat([df_spline[i-window_size:i],df_spline[i+1:i+window_size+1]]).values.flatten()
     
-    spl_win = spl_win[~np.isnan(vals_win)]
     x_win = x_win[~np.isnan(vals_win)]
     y_win = y_win[~np.isnan(vals_win)]
     z_win = z_win[~np.isnan(vals_win)]
@@ -153,11 +153,8 @@ for idx, row in tqdm(df[4:-4].iterrows(), total=df[4:-4].shape[0]):
     z = z[~np.isnan(vals)]
     vals = vals[~np.isnan(vals)]
 
-    if(len(x)<30):
-        continue
-
     x_train, x_test, y_train, y_test, z_train, z_test, vals_train, vals_test, cols_train, cols_test = train_test_split(
-        x, y, z, vals, cols, test_size=0.2, random_state=42
+        x, y, z, vals, cols, test_size=float(prop), random_state=42
     )
     
     x_train = np.concatenate([x_train,x_win])
@@ -174,11 +171,22 @@ for idx, row in tqdm(df[4:-4].iterrows(), total=df[4:-4].shape[0]):
         variogram_model="linear",
         verbose=False,
         enable_plotting=False,
+        exact_values=True,
     )
 
     vals_pred, ss_pred = OK3D.execute("points", x_test, y_test, z_test)
-    spl_test = spline_df.loc[idx.hour][cols_test].values
-    ape.append(np.abs((np.exp(vals_test+spl_test)-np.exp(vals_pred+spl_test))/np.exp(vals_test+spl_test)))
-    ape_arr = np.concatenate(ape)
-    mape = np.mean(ape_arr)
-    print(itr, mape)
+    return(idx,cols_test,vals_pred)
+
+assignment_record = Parallel(n_jobs=20)(delayed(process_row)(idx,row) for idx,row in df[4:-4].iterrows())
+
+for i in range(len(assignment_record)):
+    idx = assignment_record[i][0]
+    cols_test = assignment_record[i][1]
+    vals_pred = assignment_record[i][2]
+    df_interp.loc[idx][cols_test] = vals_pred
+    df_null.loc[idx][cols_test] = np.nan
+
+df_interp = np.exp(df_interp+df_spline)
+df_null = np.exp(df_null+df_spline)
+df_interp.to_csv("missing_readings_interpolated_{}.csv".format(prop))
+df_null.to_csv("missing_readings_{}.csv".format(prop))
