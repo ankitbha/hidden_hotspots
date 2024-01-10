@@ -16,6 +16,7 @@ runs
 *.eps
 *.pkl
 *.pickle
+*.zip
 # C extensions
 *.so
 debug
