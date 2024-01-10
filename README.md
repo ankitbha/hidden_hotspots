@@ -19,4 +19,6 @@ The data folder, not provided with this repository contains the folders govdata 
 
 The environment file for the code environment is provided to replicate the results.
 
-Inside the code folder, the three subfolders are field_estimation, generating_figures, and source_apportionment. The generating_figures folder consists of notebooks that were used to generate the figures in the paper. The field_estimation folder contains the modeling code for Kriging and Neural Network approaches, while the source_apportionment folder contains the code for Gaussian dispersion model.
+Inside the code folder, the three subfolders are field_estimation, generating_figures, and source_apportionment. The generating_figures folder consists of notebooks that were used to generate the figures in the paper. The field_estimation folder contains the modeling code for Kriging and Neural Network approaches, while the source_apportionment folder contains the code for Gaussian dispersion model. 
+
+In case there are any issues with replicating the results presented in the paper, please reach out to me at bhardwaj.ankit@nyu.edu.
