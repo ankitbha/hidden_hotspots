@@ -7,7 +7,6 @@ outputs
 *.avi
 *.mp4
 *$py.class
-*.png
 runs
 *.DS_Store
 *.pth
