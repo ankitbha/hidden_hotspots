@@ -16,3 +16,6 @@ The repository is structured as:
 The top level files CombinedLocations.xlsx and combined_distances.csv have the locations and distances between different deployed sensors (See Figure 1 in paper). The file distances_pilot2_20180130_to_20180202.xlsx has the distances for our pilot experiment (see Figure 2 in paper).
 
 The data folder, not provided with this repository contains the folders govdata and kaiterra, each having the data collected from the respective sensor network as csv files.
+
+The environment file for the code environment is provided to replicate the results.
+
