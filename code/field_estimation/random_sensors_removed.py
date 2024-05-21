@@ -1,6 +1,6 @@
 import os
 import sys
-prop = sys.argv[1]
+prop = float(sys.argv[1])
 import pytz
 import argparse
 import numpy as np
@@ -19,10 +19,10 @@ import warnings
 warnings.filterwarnings('ignore')
 warnings.simplefilter('ignore')
 os.environ['PYTHONWARNINGS']='ignore'
-import hyperopt
 from joblib import Parallel, delayed
 import random
-random.seed(42)
+seed = int(sys.argv[2])
+random.seed(seed)
 import scipy
 import torch
 from pykrige.ok import OrdinaryKriging
@@ -34,7 +34,7 @@ from scipy.interpolate import CubicSpline
 source = 'combined'
 sensor = 'pm25'
 res_time = '1H'
-filepath_root = '/scratch/ab9738/pollution_with_sensors/'
+filepath_root = '/scratch/ab9738/hidden_hotspots/'
 
 filepath_data_kai = filepath_root+'data/kaiterra/kaiterra_fieldeggid_{}_current_panel.csv'.format(res_time)
 filepath_data_gov = filepath_root+'data/govdata/govdata_{}_current.csv'.format(res_time)
@@ -75,11 +75,15 @@ elif(source=='kaiterra'):
     df = data_kai.unstack(level=0)
 else:
     df = data.unstack(level=0)
-distances = pd.read_csv('/scratch/ab9738/pollution_with_sensors/data/combined_distances.csv', index_col=[0])
+distances = pd.read_csv('/scratch/ab9738/hidden_hotspots/data/combined_distances.csv', index_col=[0])
 distances = distances.loc[df.columns, df.columns]
 distances[distances == 0] = np.nan
 
 df = np.log(df)
+
+cols = df.columns.to_list()
+cols.remove('Pusa_IMD')
+cols_train, cols_test = train_test_split(cols, test_size=prop, random_state=seed)
 
 sens = np.log(data).to_frame().reset_index()
 
@@ -117,7 +121,7 @@ spline_mat = np.transpose(spline_df['pm25'].to_numpy().reshape((60,24))).astype(
 spline_df = pd.DataFrame(spline_mat,columns=df.columns)
 spline_df = spline_df.drop(['Pusa_IMD'], axis=1)
 df = df.drop(['Pusa_IMD'], axis=1)
-spline_df = spline_df.mean(axis=1)
+spline_df = spline_df[cols_train].mean(axis=1)
 df_full = deepcopy(df)
 for idx,row in df.iterrows():
     df.loc[idx] = row-spline_df.loc[idx.hour]
@@ -126,36 +130,37 @@ df_spline = df_full-df
 df_interp = deepcopy(df)
 df_null = deepcopy(df)
 
+
 def process_row(idx, row):
     window_size = 3
     i = np.where(np.array(df.index) == idx)[0][0]
     df_slice = pd.concat([df[i-window_size:i],df[i+1:i+window_size+1]])
-    x_win = locs.loc[df.columns]['Longitude'].values
+    x_win = locs.loc[cols_train]['Longitude'].values
     x_win = np.tile(x_win,df_slice.shape[0])
-    y_win = locs.loc[df.columns]['Latitude'].values
+    y_win = locs.loc[cols_train]['Latitude'].values
     y_win = np.tile(y_win,df_slice.shape[0])    
     z_win = np.concatenate([np.arange(i-window_size,i),np.arange(i+1,i+window_size+1)])*0.01
-    z_win = np.repeat(z_win,len(df.columns))
-    vals_win = df_slice.values.flatten()
-    
+    z_win = np.repeat(z_win,len(cols_train))
+    vals_win = df_slice[cols_train].values.flatten()
     x_win = x_win[~np.isnan(vals_win)]
     y_win = y_win[~np.isnan(vals_win)]
     z_win = z_win[~np.isnan(vals_win)]
     vals_win = vals_win[~np.isnan(vals_win)]
     
-    x = locs.loc[df.columns]['Longitude'].values
-    y = locs.loc[df.columns]['Latitude'].values
-    z = np.ones_like(x)*i*0.01
-    vals = row.values
-    cols = np.array(df.columns)[~np.isnan(vals)]
-    x = x[~np.isnan(vals)]
-    y = y[~np.isnan(vals)]
-    z = z[~np.isnan(vals)]
-    vals = vals[~np.isnan(vals)]
-
-    x_train, x_test, y_train, y_test, z_train, z_test, vals_train, vals_test, cols_train, cols_test = train_test_split(
-        x, y, z, vals, cols, test_size=float(prop), random_state=42
-    )
+    x_train = locs.loc[cols_train]['Longitude'].values
+    y_train = locs.loc[cols_train]['Latitude'].values
+    z_train = np.ones_like(x_train)*i*0.01
+    vals_train = row[cols_train].values
+    
+    x_train = x_train[~np.isnan(vals_train)]
+    y_train = y_train[~np.isnan(vals_train)]
+    z_train = z_train[~np.isnan(vals_train)]
+    vals_train = vals_train[~np.isnan(vals_train)]
+    
+    x_test = locs.loc[cols_test]['Longitude'].values
+    y_test = locs.loc[cols_test]['Latitude'].values
+    z_test = np.ones_like(x_test)*i*0.01
+    vals_test = row[cols_test].values
     
     x_train = np.concatenate([x_train,x_win])
     y_train = np.concatenate([y_train,y_win])
@@ -171,11 +176,11 @@ def process_row(idx, row):
         variogram_model="linear",
         verbose=False,
         enable_plotting=False,
-        exact_values=True,
     )
 
     vals_pred, ss_pred = OK3D.execute("points", x_test, y_test, z_test)
     return(idx,cols_test,vals_pred)
+
 
 assignment_record = Parallel(n_jobs=20)(delayed(process_row)(idx,row) for idx,row in df[4:-4].iterrows())
 
@@ -188,5 +193,5 @@ for i in range(len(assignment_record)):
 
 df_interp = np.exp(df_interp+df_spline)
 df_null = np.exp(df_null+df_spline)
-df_interp.to_csv("missing_readings_interpolated_{}.csv".format(prop))
-df_null.to_csv("missing_readings_{}.csv".format(prop))
+df_interp.to_csv("intermediate_data/{}%_random_sensors_removed_interpolated_seed_{}.csv".format(prop*100, seed))
+df_null.to_csv("intermediate_data/{}%_random_sensors_removed_incomplete_seed_{}.csv".format(prop*100, seed))

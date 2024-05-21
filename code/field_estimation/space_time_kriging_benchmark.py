@@ -33,7 +33,7 @@ from scipy.interpolate import CubicSpline
 source = 'combined'
 sensor = 'pm25'
 res_time = '1H'
-filepath_root = '/scratch/ab9738/pollution_with_sensors/'
+filepath_root = '/scratch/ab9738/hidden_hotspots/'
 
 filepath_data_kai = filepath_root+'data/kaiterra/kaiterra_fieldeggid_{}_current_panel.csv'.format(res_time)
 filepath_data_gov = filepath_root+'data/govdata/govdata_{}_current.csv'.format(res_time)
@@ -74,7 +74,7 @@ elif(source=='kaiterra'):
     df = data_kai.unstack(level=0)
 else:
     df = data.unstack(level=0)
-distances = pd.read_csv('/scratch/ab9738/pollution_with_sensors/data/combined_distances.csv', index_col=[0])
+distances = pd.read_csv('/scratch/ab9738/hidden_hotspots/data/combined_distances.csv', index_col=[0])
 distances = distances.loc[df.columns, df.columns]
 distances[distances == 0] = np.nan
 df = np.log(df)

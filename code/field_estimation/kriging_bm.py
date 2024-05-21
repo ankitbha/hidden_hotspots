@@ -30,10 +30,10 @@ from pykrige.uk import UniversalKriging
 from sklearn.model_selection import train_test_split
 from scipy.interpolate import CubicSpline
 
-source = 'combined'
+source = 'govdata'
 sensor = 'pm25'
 res_time = '1H'
-filepath_root = '/scratch/ab9738/pollution_with_sensors/'
+filepath_root = '/scratch/ab9738/hidden_hotspots/'
 
 filepath_data_kai = filepath_root+'data/kaiterra/kaiterra_fieldeggid_{}_current_panel.csv'.format(res_time)
 filepath_data_gov = filepath_root+'data/govdata/govdata_{}_current.csv'.format(res_time)
@@ -48,7 +48,16 @@ locs = pd.merge(locs_kai, locs_gov, how='outer',\
                 on=['Monitor ID', 'Latitude', 'Longitude', 'Location', 'Type'], copy=False)
 data_kai = pd.read_csv(filepath_data_kai, index_col=[0,1], parse_dates=True)[sensor]
 data_gov = pd.read_csv(filepath_data_gov, index_col=[0,1], parse_dates=True)[sensor]
-data = pd.concat([data_kai, data_gov], axis=0, copy=False)
+data_kai.index.rename(inplace=True, names=['monitor_id', 'timestamp_round'])
+data_com = pd.concat([data_kai, data_gov], axis=0, copy=False)
+
+if(source=='govdata'):
+    data = deepcopy(data_gov)
+elif(source=='kaiterra'):
+    data = deepcopy(data_kai)
+else:
+    data = deepcopy(data_com)
+
 data.replace(0,np.nan,inplace=True)
 
 start_dt = data.index.levels[1][0]
@@ -68,13 +77,9 @@ if end_dt.tzname != 'IST':
 data.sort_index(inplace=True)
 data = data.loc[(slice(None), slice(start_dt, end_dt))]
 
-if(source=='govdata'):
-    df = data_gov.unstack(level=0)
-elif(source=='kaiterra'):
-    df = data_kai.unstack(level=0)
-else:
-    df = data.unstack(level=0)
-distances = pd.read_csv('/scratch/ab9738/pollution_with_sensors/data/combined_distances.csv', index_col=[0])
+df = data.unstack(level=0)
+
+distances = pd.read_csv('/scratch/ab9738/hidden_hotspots/data/combined_distances.csv', index_col=[0])
 distances = distances.loc[df.columns, df.columns]
 distances[distances == 0] = np.nan
 df = np.log(df)
@@ -85,14 +90,14 @@ sens = np.log(data).to_frame().reset_index()
 
 sens['hour_of_day'] = sens['timestamp_round'].apply(lambda x: x.hour)
 
-spline = sens.groupby(['field_egg_id', 'hour_of_day']).mean()['pm25'].reset_index()
+spline = sens.groupby(['monitor_id', 'hour_of_day']).mean()['pm25'].reset_index()
 spline_avg = sens.groupby(['hour_of_day']).mean()['pm25'].reset_index()
 
 fields = []
 times = []
 pm25 = []
-for i in np.unique(spline['field_egg_id']):
-    s_i = spline[spline['field_egg_id']==i]
+for i in np.unique(spline['monitor_id']):
+    s_i = spline[spline['monitor_id']==i]
     x = s_i['hour_of_day'].values
     y = [t for t in s_i['pm25'].values]
     c1 = CubicSpline(x[:8],y[:8])
@@ -106,17 +111,17 @@ for i in np.unique(spline['field_egg_id']):
 
 spline_df = pd.DataFrame((fields, times, pm25)).transpose()
 
-spline_df.columns = ['field_egg_id', 'time', 'pm25']
+spline_df.columns = ['monitor_id', 'time', 'pm25']
 
 hours_in_day = np.arange(24).astype(float)
 
 spline_df = spline_df[spline_df['time'].isin(hours_in_day)]
 
-spline_mat = np.transpose(spline_df['pm25'].to_numpy().reshape((60,24))).astype(float)
+spline_mat = np.transpose(spline_df['pm25'].to_numpy().reshape((-1,24))).astype(float)
 
 spline_df = pd.DataFrame(spline_mat,columns=df.columns)
-spline_df = spline_df.drop(['Pusa_IMD'], axis=1)
-df = df.drop(['Pusa_IMD'], axis=1)
+spline_df = spline_df.drop(['Pusa_IMD'], axis=1, errors='ignore')
+df = df.drop(['Pusa_IMD'], axis=1, errors='ignore')
 spline_df = spline_df.mean(axis=1)
 df_full = deepcopy(df)
 for idx,row in df.iterrows():
