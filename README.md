@@ -1,5 +1,5 @@
 # Comprehensive Monitoring of Air Pollution Hotspots Using Sparse Sensor Networks
-This repository houses the code used for the analysis of data, model training, and generation of figures for our paper with the above title. The data used for this project consists of publically available datasets as well as privately collected data. The public data used is cited accordingly in the paper. The privately collected data is governed by the data sharing agreement between NYU, Yale, and Kaiterra. 
+This repository houses the code used for the analysis of data, model training, and generation of figures for our paper with the above title. The data used for this project consists of publically available datasets as well as privately collected data. The public data used is cited accordingly in the paper. The privately collected data is governed by the data sharing agreement between the authors and Kaiterra. 
 The repository is structured as:
 ```bash
 ./
@@ -12,7 +12,7 @@ The repository is structured as:
     ├── govdata
     └── kaiterra
 ```
-The top level files CombinedLocations.xlsx and combined_distances.csv have the locations and distances between different deployed sensors (See Figure 1 in paper). The file distances_pilot2_20180130_to_20180202.xlsx has the distances for our pilot experiment (see Figure 2 in paper).
+The top level files CombinedLocations.xlsx and combined_distances.csv have the locations and distances between different deployed sensors (See Figure 1 in paper). The file distances_pilot2_20180130_to_20180202.xlsx has the distances for our pilot experiment (see Figure 1 in paper).
 
 The data folder, not provided with this repository contains the folders govdata and kaiterra, each having the data collected from the respective sensor network as csv files.
 
