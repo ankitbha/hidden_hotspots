@@ -1,6 +1,5 @@
 # Comprehensive Monitoring of Air Pollution Hotspots Using Sparse Sensor Networks
-This repository houses the code used for the analysis of data, model training, and generation of figures for our paper with the above title. The data used for this project consists of publically available datasets as well as privately collected data. The public data used is cited accordingly in the paper. The privately collected data is governed by the data sharing agreement between NYU, Yale, and Kaiterra. For access to the private data, please reach out to Lakshminarayanan Subramanian at lakshmi@nyu.edu.
-
+This repository houses the code used for the analysis of data, model training, and generation of figures for our paper with the above title. The data used for this project consists of publically available datasets as well as privately collected data. The public data used is cited accordingly in the paper. The privately collected data is governed by the data sharing agreement between NYU, Yale, and Kaiterra. 
 The repository is structured as:
 ```bash
 ./
@@ -21,4 +20,3 @@ The environment file for the code environment is provided to replicate the resul
 
 Inside the code folder, the three subfolders are field_estimation, generating_figures, and source_apportionment. The generating_figures folder consists of notebooks that were used to generate the figures in the paper. The field_estimation folder contains the modeling code for Kriging and Neural Network approaches, while the source_apportionment folder contains the code for Gaussian dispersion model. 
 
-In case there are any issues with replicating the results presented in the paper, please reach out to me at bhardwaj.ankit@nyu.edu.
